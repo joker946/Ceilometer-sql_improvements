@@ -61,8 +61,8 @@ def _get_aggregate_functions(aggregate):
             functions.append(compute(a.param))
         else:
             raise ceilometer.NotImplementedError(
-               'Selectable aggregate function %s'
-               ' is not supported' % a.func)
+                'Selectable aggregate function %s'
+                ' is not supported' % a.func)
 
     return functions
 
@@ -246,14 +246,14 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
             sample_filter.end or res.tsmax,
             period):
         if query.find(" samples.timestamp >=") == -1:
-            seq = (query[:query.index('GROUP BY')-1],
+            seq = (query[:query.index('GROUP BY') - 1],
                    query[query.index('GROUP BY'):])
         query = ' AND samples.timestamp >= %s '.join(seq)
         if query.find(" samples.timestamp <") == -1:
-            seq = (query[:query.index('GROUP BY')-1],
+            seq = (query[:query.index('GROUP BY') - 1],
                    query[query.index('GROUP BY'):])
         query = ' AND samples.timestamp < %s '.join(seq)
-        cur.execute(query, values+[period_start, period_end])
+        cur.execute(query, values + [period_start, period_end])
         result = cur.fetchall()
         for r in result:
             yield _stats_result_to_model(

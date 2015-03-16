@@ -9,5 +9,5 @@ for i in data:
     cur.execute("SELECT \"write_sample\"(%s);", (d,))
     conn.commit()
 
-
+cur.close()
 conn.close()
