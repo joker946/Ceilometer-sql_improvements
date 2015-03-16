@@ -1,4 +1,11 @@
 import psycopg2
+# from oslo.utils import timeutils
+# from sqlalchemy import func
+# from sqlalchemy import distinct
+# import ceilometer
+# from ceilometer import storage
+# from ceilometer.storage import base
+# from ceilometer.storage.sqlalchemy import models
 
 
 STANDARD_AGGREGATES = dict(
@@ -43,21 +50,19 @@ def _get_aggregate_functions(aggregate):
     for a in aggregate:
         if a.func in STANDARD_AGGREGATES:
             functions.append(STANDARD_AGGREGATES[a.func])
-        # IGNORE THIS FOR TEST PURPOSES
-        # elif a.func in UNPARAMETERIZED_AGGREGATES:
-        #    functions.append(UNPARAMETERIZED_AGGREGATES[a.func])
-        # elif a.func in PARAMETERIZED_AGGREGATES['compute']:
-        #    validate = PARAMETERIZED_AGGREGATES['validate'].get(a.func)
-        #    if not (validate and validate(a.param)):
-        #        raise storage.StorageBadAggregate('Bad aggregate: %s.%s'
-        #                                          % (a.func, a.param))
-        #    compute = PARAMETERIZED_AGGREGATES['compute'][a.func]
-        #    functions.append(compute(a.param))
+        elif a.func in UNPARAMETERIZED_AGGREGATES:
+            functions.append(UNPARAMETERIZED_AGGREGATES[a.func])
+        elif a.func in PARAMETERIZED_AGGREGATES['compute']:
+            validate = PARAMETERIZED_AGGREGATES['validate'].get(a.func)
+            if not (validate and validate(a.param)):
+                raise storage.StorageBadAggregate('Bad aggregate: %s.%s'
+                                                  % (a.func, a.param))
+            compute = PARAMETERIZED_AGGREGATES['compute'][a.func]
+            functions.append(compute(a.param))
         else:
-            pass
-            # raise ceilometer.NotImplementedError(
-            #    'Selectable aggregate function %s'
-            #    ' is not supported' % a.func)
+            raise ceilometer.NotImplementedError(
+               'Selectable aggregate function %s'
+               ' is not supported' % a.func)
 
     return functions
 
@@ -117,7 +122,6 @@ def _make_sql_query_from_filter(query, sample_filter,
 
 
 def _make_stats_query(sample_filter, groupby, aggregate):
-    # TODO make _get_aggregate_functions call
     sql_select = ("SELECT min(samples.timestamp), max(samples.timestamp),"
                   " meters.unit")
     aggr = _get_aggregate_functions(aggregate)
@@ -215,34 +219,67 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
         if result:
             for res in result:
                 res = _make_object_from_tuple(res, groupby, aggregate)
-                print _stats_result_to_model(res, 0,
+                yield _stats_result_to_model(res, 0,
                                              res.tsmin, res.tsmax,
                                              groupby,
                                              aggregate)
         cur.close()
         return
+
     if not sample_filter.start or not sample_filter.end:
-        res = _make_stats_query(sample_filter, None, aggregate).first()
+        q, v = _make_stats_query(sample_filter, None, aggregate)
+        cur.execute(q, v)
+        result = cur.fetchall()
+        res = _make_object_from_tuple(result[0], None, aggregate)
         if not res:
                 # NOTE(liusheng):The 'res' may be NoneType, because no
                 # sample has found with sample filter(s).
             return
-    query = _make_stats_query(sample_filter, groupby, aggregate)
+    query, values = _make_stats_query(sample_filter, groupby, aggregate)
+        # HACK(jd) This is an awful method to compute stats by period, but
+        # since we're trying to be SQL agnostic we have to write portable
+        # code, so here it is, admire! We're going to do one request to get
+        # stats by period. We would like to use GROUP BY, but there's no
+        # portable way to manipulate timestamp in SQL, so we can't.
+    for period_start, period_end in base.iter_period(
+            sample_filter.start or res.tsmin,
+            sample_filter.end or res.tsmax,
+            period):
+        if query.find(" samples.timestamp >=") == -1:
+            seq = (query[:query.index('GROUP BY')-1],
+                   query[query.index('GROUP BY'):])
+        query = ' AND samples.timestamp >= %s '.join(seq)
+        if query.find(" samples.timestamp <") == -1:
+            seq = (query[:query.index('GROUP BY')-1],
+                   query[query.index('GROUP BY'):])
+        query = ' AND samples.timestamp < %s '.join(seq)
+        cur.execute(query, values+[period_start, period_end])
+        result = cur.fetchall()
+        for r in result:
+            yield _stats_result_to_model(
+                result=r,
+                period=int(timeutils.delta_seconds(period_start,
+                                                   period_end)),
+                period_start=period_start,
+                period_end=period_end,
+                groupby=groupby,
+                aggregate=aggregate
+            )
 
 # MOCK OBJECTS
 sample_filter = Object()
-sample_filter.meter = 'disk.ephemeral.size'
+sample_filter.meter = 'cpu_util'
 sample_filter.source = 'openstack'
-sample_filter.start = '2014-08-20 10:02:35'
-sample_filter.start_timestamp_op = 'ge'
-sample_filter.end = '2014-08-20 10:02:50.503009'
-sample_filter.end_timestamp_op = 'le'
+sample_filter.start = None
+sample_filter.start_timestamp_op = None
+sample_filter.end = None
+sample_filter.end_timestamp_op = None
 sample_filter.user = None
 sample_filter.project = None
 sample_filter.resource = None
 sample_filter.message_id = None
 sample_filter.metaquery = None
-group = ['resource_id', 'project_id']
+group = ['resource_id']
 aggr1 = Object()
 aggr1.func = 'max'
 aggr1.param = None
@@ -250,5 +287,6 @@ aggr2 = Object()
 aggr2.func = 'avg'
 aggr2.param = None
 aggregate_list = [aggr1, aggr2]
-
-get_meter_statistics(sample_filter, groupby=group, aggregate=aggregate_list)
+for gms in get_meter_statistics(sample_filter, groupby=group,
+                                aggregate=None):
+    print gms
