@@ -42,6 +42,28 @@ class Object(object):
     pass
 
 
+class PoolConnection(object):
+
+    def __init__(self, readonly=False):
+        self._conn = psycopg2.connect("dbname=ceilometer user=alexchadin")
+        self._readonly = readonly
+
+    def __enter__(self):
+        self._cur = self._conn.cursor()
+        if self._readonly:
+            self._conn.autocommit = True
+        return self._cur
+
+    def __exit__(self, ex_type, ex_value, ex_traceback):
+        self._cur.close()
+        if self._readonly:
+            self._conn.autocommit = False
+        elif ex_type is None:
+            self._conn.commit()
+        else:
+            self._conn.rollback()
+
+
 def _get_aggregate_functions(aggregate):
     if not aggregate:
         return [f for f in STANDARD_AGGREGATES.values()]
@@ -203,8 +225,6 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
     Items are containing meter statistics described by the query
     parameters. The filter must have a meter value set.
     """
-    conn = psycopg2.connect("dbname=ceilometer user=alexchadin")
-    cur = conn.cursor()
     if groupby:
         for group in groupby:
             if group not in ['user_id', 'project_id', 'resource_id']:
@@ -214,8 +234,9 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
                 raise Exception("Unable to group by these fields")
     if not period:
         q, v = _make_stats_query(sample_filter, groupby, aggregate)
-        cur.execute(q, v)
-        result = cur.fetchall()
+        with PoolConnection() as cur:
+            cur.execute(q, v)
+            result = cur.fetchall()
         if result:
             for res in result:
                 res = _make_object_from_tuple(res, groupby, aggregate)
@@ -228,8 +249,9 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
 
     if not sample_filter.start or not sample_filter.end:
         q, v = _make_stats_query(sample_filter, None, aggregate)
-        cur.execute(q, v)
-        result = cur.fetchall()
+        with PoolConnection() as cur:
+            cur.execute(q, v)
+            result = cur.fetchall()
         res = _make_object_from_tuple(result[0], None, aggregate)
         if not res:
                 # NOTE(liusheng):The 'res' may be NoneType, because no
@@ -253,8 +275,9 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
             seq = (query[:query.index('GROUP BY') - 1],
                    query[query.index('GROUP BY'):])
         query = ' AND samples.timestamp < %s '.join(seq)
-        cur.execute(query, values + [period_start, period_end])
-        result = cur.fetchall()
+        with PoolConnection() as cur:
+            cur.execute(query, values + [period_start, period_end])
+            result = cur.fetchall()
         for r in result:
             yield _stats_result_to_model(
                 result=r,
@@ -287,6 +310,6 @@ aggr2 = Object()
 aggr2.func = 'avg'
 aggr2.param = None
 aggregate_list = [aggr1, aggr2]
-for gms in get_meter_statistics(sample_filter, groupby=group,
-                                aggregate=None):
-    print gms
+for stat in get_meter_statistics(sample_filter, groupby=group,
+                                 aggregate=None):
+    print stat
