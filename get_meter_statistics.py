@@ -66,16 +66,18 @@ def _get_aggregate_functions(aggregate):
 
 
 def _make_stats_query(sample_filter, groupby, aggregate):
-    sql_select = ("SELECT min(samples.timestamp), max(samples.timestamp),"
-                  " meters.unit")
+    sql_select = ("SELECT min(samples.timestamp) as tsmin,"
+                  " max(samples.timestamp) as tsmax,"
+                  " meters.unit as unit")
     aggr = _get_aggregate_functions(aggregate)
     for a in aggr:
         sql_select += ", {}".format(a)
     if groupby:
         # IGNORE THIS FOR TEST PURPOSES
         #group_attributes = [getattr(models.Resource, g) for g in groupby]
-        group_attributes = ', '.join([ID_UUID_NAME_CONFORMITY[g]
-                                      for g in groupby])
+        group_attributes = ', '.join(['{} as {}'.format(
+            ID_UUID_NAME_CONFORMITY[g], g)
+            for g in groupby])
         sql_select += ', {}'.format(group_attributes)
     sql_select += (" FROM samples"
                    " JOIN resources ON samples.resource_id = resources.id"
@@ -86,6 +88,8 @@ def _make_stats_query(sample_filter, groupby, aggregate):
     sql_select, values = make_sql_query_from_filter(sql_select, sample_filter)
     sql_select += " GROUP BY meters.unit"
     if groupby:
+        group_attributes = ', '.join([ID_UUID_NAME_CONFORMITY[g]
+                                      for g in groupby])
         sql_select += ', {}'.format(group_attributes)
     sql_select += ";"
     print sql_select
@@ -125,20 +129,6 @@ def _stats_result_to_model(result, period, period_start,
     return stats_args
 
 
-def _make_object_from_tuple(res, groupby, aggregate):
-    keys = ['tsmin', 'tsmax', 'unit']
-    if aggregate:
-        keys += [a.func for a in aggregate]
-    else:
-        keys += [f for f in STANDARD_AGGREGATES.keys()]
-    if groupby:
-        keys += groupby
-    obj = Object()
-    for k, i in zip(keys, res):
-        setattr(obj, k, i)
-    return obj
-
-
 def get_meter_statistics(sample_filter, period=None, groupby=None,
                          aggregate=None):
     """Return an iterable of api_models.Statistics instances.
@@ -158,9 +148,9 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
         with PoolConnection() as cur:
             cur.execute(q, v)
             result = cur.fetchall()
+            print result
         if result:
             for res in result:
-                res = _make_object_from_tuple(res, groupby, aggregate)
                 yield _stats_result_to_model(res, 0,
                                              res.tsmin, res.tsmax,
                                              groupby,
@@ -173,7 +163,7 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
         with PoolConnection() as cur:
             cur.execute(q, v)
             result = cur.fetchall()
-        res = _make_object_from_tuple(result[0], None, aggregate)
+        res = result[0]
         if not res:
                 # NOTE(liusheng):The 'res' may be NoneType, because no
                 # sample has found with sample filter(s).
