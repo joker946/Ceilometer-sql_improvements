@@ -1,6 +1,10 @@
 from ceilometer_local_lib import make_sql_query_from_filter
 from ceilometer_local_lib import PoolConnection
 from ceilometer_local_lib import Object
+import datetime
+from six import moves
+import math
+from oslo.utils import timeutils
 # from oslo.utils import timeutils
 # from sqlalchemy import func
 # from sqlalchemy import distinct
@@ -38,6 +42,26 @@ ID_UUID_NAME_CONFORMITY = {
     'user_id': 'users.uuid',
     'resource_id': 'resources.resource_id'
 }
+
+
+def iter_period(start, end, period):
+    """Split a time from start to end in periods of a number of seconds.
+
+    This function yields the (start, end) time for each period composing the
+    time passed as argument.
+
+    :param start: When the period set start.
+    :param end: When the period end starts.
+    :param period: The duration of the period.
+    """
+    period_start = start
+    increment = datetime.timedelta(seconds=period)
+    for i in moves.xrange(int(math.ceil(
+            timeutils.delta_seconds(start, end)
+            / float(period)))):
+        next_start = period_start + increment
+        yield (period_start, next_start)
+        period_start = next_start
 
 
 def _get_aggregate_functions(aggregate):
@@ -174,31 +198,30 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
         # code, so here it is, admire! We're going to do one request to get
         # stats by period. We would like to use GROUP BY, but there's no
         # portable way to manipulate timestamp in SQL, so we can't.
-    for period_start, period_end in base.iter_period(
+    for period_start, period_end in iter_period(
             sample_filter.start or res.tsmin,
             sample_filter.end or res.tsmax,
             period):
         if query.find(" samples.timestamp >=") == -1:
-            seq = (query[:query.index('GROUP BY') - 1],
-                   query[query.index('GROUP BY'):])
-        query = ' AND samples.timestamp >= %s '.join(seq)
+            seq = [query[:query.index('GROUP BY') - 1],
+                   query[query.index('GROUP BY'):]]
+            query = ' AND samples.timestamp >= %s '.join(seq)
         if query.find(" samples.timestamp <") == -1:
-            seq = (query[:query.index('GROUP BY') - 1],
-                   query[query.index('GROUP BY'):])
-        query = ' AND samples.timestamp < %s '.join(seq)
+            seq = [query[:query.index('GROUP BY') - 1],
+                   query[query.index('GROUP BY'):]]
+            query = ' AND samples.timestamp < %s '.join(seq)
         with PoolConnection() as cur:
             cur.execute(query, values + [period_start, period_end])
-            result = cur.fetchall()
-        for r in result:
-            yield _stats_result_to_model(
-                result=r,
-                period=int(timeutils.delta_seconds(period_start,
-                                                   period_end)),
-                period_start=period_start,
-                period_end=period_end,
-                groupby=groupby,
-                aggregate=aggregate
-            )
+            result = cur.fetchone()
+        yield _stats_result_to_model(
+            result=result,
+            period=int(timeutils.delta_seconds(period_start,
+                                               period_end)),
+            period_start=period_start,
+            period_end=period_end,
+            groupby=groupby,
+            aggregate=aggregate
+        )
 
 # MOCK OBJECTS
 sample_filter = Object()
@@ -222,5 +245,5 @@ aggr2.func = 'avg'
 aggr2.param = None
 aggregate_list = [aggr1, aggr2]
 for stat in get_meter_statistics(sample_filter, groupby=group,
-                                 aggregate=None):
+                                 aggregate=None, period=3600):
     print stat

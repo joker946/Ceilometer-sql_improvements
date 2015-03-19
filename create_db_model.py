@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import psycopg2
-import sys
 
 con = None
 
@@ -75,7 +74,6 @@ try:
     cur.execute('ALTER TABLE samples ALTER COLUMN id SET DEFAULT'
                 ' NEXTVAL(\'samples_id_seq\')')
     con.commit()
-
 
 
 finally:
