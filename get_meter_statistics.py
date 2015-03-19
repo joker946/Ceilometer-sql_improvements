@@ -1,4 +1,6 @@
-import psycopg2
+from ceilometer_local_lib import make_sql_query_from_filter
+from ceilometer_local_lib import PoolConnection
+from ceilometer_local_lib import Object
 # from oslo.utils import timeutils
 # from sqlalchemy import func
 # from sqlalchemy import distinct
@@ -31,37 +33,11 @@ PARAMETERIZED_AGGREGATES = dict(
     )
 )"""
 ID_UUID_NAME_CONFORMITY = {
-    'source_id': ', sources.name',
-    'project_id': ', projects.uuid',
-    'user_id': ', users.uuid',
-    'resource_id': ', resources.resource_id'
+    'source_id': 'sources.name',
+    'project_id': 'projects.uuid',
+    'user_id': 'users.uuid',
+    'resource_id': 'resources.resource_id'
 }
-
-
-class Object(object):
-    pass
-
-
-class PoolConnection(object):
-
-    def __init__(self, readonly=False):
-        self._conn = psycopg2.connect("dbname=ceilometer user=alexchadin")
-        self._readonly = readonly
-
-    def __enter__(self):
-        self._cur = self._conn.cursor()
-        if self._readonly:
-            self._conn.autocommit = True
-        return self._cur
-
-    def __exit__(self, ex_type, ex_value, ex_traceback):
-        self._cur.close()
-        if self._readonly:
-            self._conn.autocommit = False
-        elif ex_type is None:
-            self._conn.commit()
-        else:
-            self._conn.rollback()
 
 
 def _get_aggregate_functions(aggregate):
@@ -89,60 +65,6 @@ def _get_aggregate_functions(aggregate):
     return functions
 
 
-def concat_query(query, line, keyword):
-    if keyword == 'WHERE' and keyword in query:
-        query += " AND {}".format(line)
-    elif keyword == 'WHERE' and keyword not in query:
-        query += " WHERE {}".format(line)
-    return query
-
-
-def _make_sql_query_from_filter(query, sample_filter,
-                                limit=None, require_meter=True):
-    values = []
-    if sample_filter.meter:
-        query = concat_query(query, "meters.name = %s", 'WHERE')
-        values.append(sample_filter.meter)
-    elif require_meter:
-        raise RuntimeError('Missing required meter specifier')
-    if sample_filter.source:
-        query = concat_query(query, "sources.name = %s", 'WHERE')
-        values.append(sample_filter.source)
-    if sample_filter.start:
-        ts_start = sample_filter.start
-        if sample_filter.start_timestamp_op == 'gt':
-            query = concat_query(query, "samples.timestamp > %s", 'WHERE')
-        else:
-            query = concat_query(query, "samples.timestamp >= %s", 'WHERE')
-        values.append(ts_start)
-    if sample_filter.end:
-        ts_end = sample_filter.end
-        if sample_filter.end_timestamp_op == 'le':
-            query = concat_query(query, "samples.timestamp <= %s", 'WHERE')
-        else:
-            query = concat_query(query, "samples.timestamp < %s", 'WHERE')
-        values.append(ts_end)
-    if sample_filter.user:
-        query = concat_query(query, "user_id = %s", 'WHERE')
-        values.append(sample_filter.user)
-    if sample_filter.project:
-        query = concat_query(query, "projects_id = %s", 'WHERE')
-        values.append(sample_filter.project)
-    if sample_filter.resource:
-        query = concat_query(query, "resources.resource_id = %s", 'WHERE')
-        values.append(sample_filter.resource)
-    if sample_filter.message_id:
-        query = concat_query(query, "samples.message_id = %s", 'WHERE')
-        values.append(sample_filter.message_id)
-    if sample_filter.metaquery:
-        # Note (alexchadin): This section needs to be implemented.
-        pass
-    if limit:
-        query += " LIMIT %s"
-        values.append(limit)
-    return query, values
-
-
 def _make_stats_query(sample_filter, groupby, aggregate):
     sql_select = ("SELECT min(samples.timestamp), max(samples.timestamp),"
                   " meters.unit")
@@ -152,20 +74,19 @@ def _make_stats_query(sample_filter, groupby, aggregate):
     if groupby:
         # IGNORE THIS FOR TEST PURPOSES
         #group_attributes = [getattr(models.Resource, g) for g in groupby]
-        group_attributes = [g for g in groupby]
-        for g in group_attributes:
-            sql_select += ID_UUID_NAME_CONFORMITY[g]
+        group_attributes = ', '.join([ID_UUID_NAME_CONFORMITY[g]
+                                      for g in groupby])
+        sql_select += ', {}'.format(group_attributes)
     sql_select += (" FROM samples"
                    " JOIN resources ON samples.resource_id = resources.id"
                    " JOIN meters ON samples.meter_id = meters.id"
                    " JOIN sources ON samples.source_id = sources.id"
                    " JOIN projects ON samples.project_id = projects.id"
                    " JOIN users ON samples.user_id = users.id")
-    sql_select, values = _make_sql_query_from_filter(sql_select, sample_filter)
+    sql_select, values = make_sql_query_from_filter(sql_select, sample_filter)
     sql_select += " GROUP BY meters.unit"
     if groupby:
-        for g in group_attributes:
-            sql_select += ID_UUID_NAME_CONFORMITY[g]
+        sql_select += ', {}'.format(group_attributes)
     sql_select += ";"
     print sql_select
     return sql_select, values
