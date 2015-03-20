@@ -51,6 +51,6 @@ sample_filter.user = None
 sample_filter.project = None
 sample_filter.resource = None
 sample_filter.message_id = None
-sample_filter.metaquery = None
+sample_filter.metaquery = {'metadata.status': 'active'}
 
 get_samples(sample_filter)

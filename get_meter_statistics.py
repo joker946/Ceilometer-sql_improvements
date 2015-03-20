@@ -186,8 +186,8 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
         q, v = _make_stats_query(sample_filter, None, aggregate)
         with PoolConnection() as cur:
             cur.execute(q, v)
-            result = cur.fetchall()
-        res = result[0]
+            result = cur.fetchone()
+        res = result
         if not res:
                 # NOTE(liusheng):The 'res' may be NoneType, because no
                 # sample has found with sample filter(s).
@@ -235,7 +235,7 @@ sample_filter.user = None
 sample_filter.project = None
 sample_filter.resource = None
 sample_filter.message_id = None
-sample_filter.metaquery = None
+sample_filter.metaquery = {'metadata.status': 'active'}
 group = ['resource_id']
 aggr1 = Object()
 aggr1.func = 'max'
@@ -245,5 +245,5 @@ aggr2.func = 'avg'
 aggr2.param = None
 aggregate_list = [aggr1, aggr2]
 for stat in get_meter_statistics(sample_filter, groupby=group,
-                                 aggregate=None, period=3600):
+                                 aggregate=None, period=3000):
     print stat

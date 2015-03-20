@@ -1,5 +1,43 @@
 import psycopg2
 from psycopg2.extras import NamedTupleCursor
+import six
+
+
+def make_complex_json_query(l, n, v):
+    """Recursive function that makes complex query with 2 or more nesting.
+
+    :param l: list of splitted substring.
+    :param n: initial index (default=0).
+    :param v: value that should be returned at the end of recursion.
+    """
+    if n == len(l):
+        if isinstance(v, (int, long, bool)):
+            return str(v)
+        else:
+            return '\"{}\"'.format(str(v))
+
+    while n < len(l):
+        n += 1
+        return ('{\"' + l[n - 1] + '\": ' +
+                str(make_complex_json_query(l, n, v)) + '}')
+
+
+def apply_metaquery_filter(metaquery):
+    """Apply provided metaquery filter to existing query.
+
+    :param session: session used for original query
+    :param query: Query instance
+    :param metaquery: dict with metadata to match on.
+    """
+    sql_metaquery = ''
+    subq_and = ' AND metadata @> \'{}\''
+    for k, value in six.iteritems(metaquery):
+        # TODO (alexchadin) is bool req?
+        key = k[9:]  # strip out 'metadata.' prefix
+        l = key.split('.')
+        res = make_complex_json_query(l, 0, value)
+        sql_metaquery += subq_and.format(res)
+    return sql_metaquery
 
 
 def make_sql_query_from_filter(query, sample_filter,
@@ -42,8 +80,7 @@ def make_sql_query_from_filter(query, sample_filter,
         sql_where_body += subq_and.format('samples.message_id = %s')
         values.append(sample_filter.message_id)
     if sample_filter.metaquery:
-        # Note (alexchadin): This section needs to be implemented.
-        pass
+        sql_where_body += apply_metaquery_filter(sample_filter.metaquery)
     if limit:
         query += " LIMIT %s"
         values.append(limit)
