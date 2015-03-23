@@ -5,6 +5,7 @@ import datetime
 from six import moves
 import math
 from oslo.utils import timeutils
+from dateutil import parser
 # from oslo.utils import timeutils
 # from sqlalchemy import func
 # from sqlalchemy import distinct
@@ -172,7 +173,6 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
         with PoolConnection() as cur:
             cur.execute(q, v)
             result = cur.fetchall()
-            print result
         if result:
             for res in result:
                 yield _stats_result_to_model(res, 0,
@@ -202,6 +202,9 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
             sample_filter.start or res.tsmin,
             sample_filter.end or res.tsmax,
             period):
+        values_to_add = []
+        values_to_delete = []
+
         if query.find(" samples.timestamp >=") == -1:
             seq = [query[:query.index('GROUP BY') - 1],
                    query[query.index('GROUP BY'):]]
@@ -210,32 +213,54 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
             seq = [query[:query.index('GROUP BY') - 1],
                    query[query.index('GROUP BY'):]]
             query = ' AND samples.timestamp < %s '.join(seq)
+
+        if sample_filter.end and not sample_filter.start:
+            query = query.replace('AND samples.timestamp >= %s',
+                                  'AND samples.timestamp < %s')
+            query = query.replace('AND samples.timestamp < %s',
+                                  'AND samples.timestamp >= %s', 1)
+
+        if sample_filter.end and sample_filter.end < period_end:
+            period_end = sample_filter.end
+        for d in values:
+            if isinstance(d, datetime.datetime):
+                values_to_delete.append(d)
+        for i in values_to_delete:
+            values.remove(i)
+        values_to_add.append(period_start)
+        values_to_add.append(period_end)
+
         with PoolConnection() as cur:
-            cur.execute(query, values + [period_start, period_end])
+            cur.execute(query, values + values_to_add)
             result = cur.fetchone()
-        yield _stats_result_to_model(
-            result=result,
-            period=int(timeutils.delta_seconds(period_start,
-                                               period_end)),
-            period_start=period_start,
-            period_end=period_end,
-            groupby=groupby,
-            aggregate=aggregate
-        )
+        if result:
+            yield _stats_result_to_model(
+                result=result,
+                period=int(timeutils.delta_seconds(period_start,
+                                                   period_end)),
+                period_start=period_start,
+                period_end=period_end,
+                groupby=groupby,
+                aggregate=aggregate
+            )
 
 # MOCK OBJECTS
 sample_filter = Object()
 sample_filter.meter = 'cpu_util'
 sample_filter.source = 'openstack'
+dt = parser.parse("2015-03-16 12:51:51")
+dt1 = parser.parse("2015-03-16 14:31:52")
 sample_filter.start = None
-sample_filter.start_timestamp_op = None
+sample_filter.start_timestamp_op = 'ge'
 sample_filter.end = None
-sample_filter.end_timestamp_op = None
+sample_filter.end_timestamp_op = 'lt'
 sample_filter.user = None
 sample_filter.project = None
 sample_filter.resource = None
 sample_filter.message_id = None
-sample_filter.metaquery = {'metadata.status': 'active'}
+sample_filter.metaquery = {'metadata.status': 'active',
+                           'metadata.memory_mb': 512,
+                           'metadata.image.name': 'cirros-0.3.3-x86_64'}
 group = ['resource_id']
 aggr1 = Object()
 aggr1.func = 'max'
@@ -245,5 +270,5 @@ aggr2.func = 'avg'
 aggr2.param = None
 aggregate_list = [aggr1, aggr2]
 for stat in get_meter_statistics(sample_filter, groupby=group,
-                                 aggregate=None, period=3000):
+                                 aggregate=None, period=3600):
     print stat

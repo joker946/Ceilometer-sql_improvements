@@ -30,14 +30,19 @@ def apply_metaquery_filter(metaquery):
     :param metaquery: dict with metadata to match on.
     """
     sql_metaquery = ''
-    subq_and = ' AND metadata @> \'{}\''
     for k, value in six.iteritems(metaquery):
         # TODO (alexchadin) is bool req?
         key = k[9:]  # strip out 'metadata.' prefix
         l = key.split('.')
-        res = make_complex_json_query(l, 0, value)
-        sql_metaquery += subq_and.format(res)
-    return sql_metaquery
+        if len(l) == 1:
+            if isinstance(value, (int, long, bool)):
+                sql_metaquery += '\"{}\": {}, '.format(key, value)
+            else:
+                sql_metaquery += '\"{}\": \"{}\", '.format(key, value)
+        else:
+            sql_metaquery += '\"{}\": {}, '.format(
+                l[0], make_complex_json_query(l, 1, value))
+    return ' AND metadata @> \'{{{}}}\''.format(sql_metaquery[:-2])
 
 
 def make_sql_query_from_filter(query, sample_filter,
