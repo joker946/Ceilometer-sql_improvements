@@ -24,5 +24,5 @@ def apply_metaquery_filter(metaquery):
     meta_filter = dict()
     for key, value in six.iteritems(metaquery):
         meta_filter.update(make_metaquery(key, value))
-    return ' AND metadata @> %s' % Json(meta_filter).getquoted()
+    return 'metadata @> %s' % Json(meta_filter).getquoted()
 print apply_metaquery_filter(metaquery)

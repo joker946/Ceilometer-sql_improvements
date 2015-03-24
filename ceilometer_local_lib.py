@@ -21,7 +21,7 @@ def apply_metaquery_filter(metaquery):
     meta_filter = dict()
     for key, value in six.iteritems(metaquery):
         meta_filter.update(make_metaquery(key, value))
-    return ' AND metadata @> %s' % Json(meta_filter).getquoted()
+    return ('metadata @> %s', Json(meta_filter))
 
 
 def make_sql_query_from_filter(query, sample_filter,
@@ -64,7 +64,9 @@ def make_sql_query_from_filter(query, sample_filter,
         sql_where_body += subq_and.format('samples.message_id = %s')
         values.append(sample_filter.message_id)
     if sample_filter.metaquery:
-        sql_where_body += apply_metaquery_filter(sample_filter.metaquery)
+        q, v = apply_metaquery_filter(sample_filter.metaquery)
+        sql_where_body += subq_and.format(q)
+        values.append(v)
     if limit:
         query += " LIMIT %s"
         values.append(limit)
