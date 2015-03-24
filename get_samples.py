@@ -3,13 +3,6 @@ from ceilometer_local_lib import PoolConnection
 from ceilometer_local_lib import Object
 
 
-def make_list(resp):
-    result = []
-    for r in resp:
-        result.append(r[0])
-    return result
-
-
 def get_samples(sample_filter, limit=None):
     """Return an iterable of model.Sample instances.
 
