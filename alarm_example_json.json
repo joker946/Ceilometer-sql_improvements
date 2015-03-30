@@ -1,0 +1,42 @@
+{
+    "alarm_id": "9b50ae2f-01fa-4ffc-819d-eb30d4110fa0",
+    "alarm_actions": [
+        "log://"
+    ],
+    "ok_actions": [
+        
+    ],
+    "description": "instance running hot",
+    "state": "ok",
+    "timestamp": "2015-03-29T22:33:07.851Z",
+    "enabled": false,
+    "state_timestamp": "2015-03-29T22:34:11.709Z",
+    "rule": {
+        "meter_name": "cpu_util",
+        "evaluation_periods": 3,
+        "period": 600,
+        "statistic": "avg",
+        "threshold": 70,
+        "query": [
+            {
+                "field": "resource_id",
+                "type": "",
+                "value": "465e284e-7351-4130-b668-bfa7980969f4",
+                "op": "eq"
+            }
+        ],
+        "comparison_operator": "gt",
+        "exclude_outliers": false
+    },
+    "time_constraints": [
+        
+    ],
+    "insufficient_data_actions": [
+        
+    ],
+    "repeat_actions": false,
+    "user_id": "3d622ea5a70a42d3aae549ddfc1ef355",
+    "project_id": "",
+    "type": "threshold",
+    "name": "cpu_high"
+}

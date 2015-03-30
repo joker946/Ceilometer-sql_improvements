@@ -8,6 +8,7 @@ con = None
 try:
     con = psycopg2.connect("dbname=ceilometer user=alexchadin")
     cur = con.cursor()
+    """
     # sources
     cur.execute('CREATE SEQUENCE sources_id_seq;')
     cur.execute('CREATE TABLE IF NOT EXISTS sources ('
@@ -73,6 +74,42 @@ try:
                 ');')
     cur.execute('ALTER TABLE samples ALTER COLUMN id SET DEFAULT'
                 ' NEXTVAL(\'samples_id_seq\')')
+
+    #alarms
+    cur.execute('CREATE SEQUENCE alarms_id_seq;')
+    cur.execute('CREATE TABLE IF NOT EXISTS alarm ('
+                ' alarm_id bigserial PRIMARY KEY,'
+                ' enabled boolean,'
+                ' name text,'
+                ' type text,'
+                ' description text,'
+                ' timestamp timestamp,'
+                ' user_id bigint references users(id),'
+                ' project_id bigint references projects(id),'
+                ' state text,'
+                ' ok_actions jsonb,'
+                ' alarm_actions jsonb,'
+                ' insufficient_data_actions jsonb,'
+                ' repeat_actions boolean,'
+                ' rule jsonb,'
+                ' time_constraints jsonb)'
+                ';')
+    cur.execute('ALTER TABLE alarm ALTER COLUMN alarm_id SET DEFAULT'
+                ' NEXTVAL (\'alarms_id_seq\');')
+    """
+    cur.execute('CREATE SEQUENCE alarms_change_id_seq;')
+    cur.execute('CREATE TABLE IF NOT EXISTS alarm_change ('
+                ' event_id bigserial PRIMARY KEY,'
+                ' alarm_id bigint references alarm(alarm_id),'
+                ' on_behalf_of bigint references projects(id),'
+                ' project_id bigint references projects(id),'
+                ' user_id bigint references users(id),'
+                ' type text,'
+                ' detail text,'
+                ' timestamp timestamp)'
+                ';')
+    cur.execute('ALTER TABLE alarm_change ALTER COLUMN event_id SET DEFAULT'
+                ' NEXTVAL (\'alarms_change_id_seq\');')
     con.commit()
 
 
