@@ -74,7 +74,7 @@ try:
                 ');')
     cur.execute('ALTER TABLE samples ALTER COLUMN id SET DEFAULT'
                 ' NEXTVAL(\'samples_id_seq\')')
-
+"""
     #alarms
     cur.execute('CREATE SEQUENCE alarms_id_seq;')
     cur.execute('CREATE TABLE IF NOT EXISTS alarm ('
@@ -96,7 +96,6 @@ try:
                 ';')
     cur.execute('ALTER TABLE alarm ALTER COLUMN alarm_id SET DEFAULT'
                 ' NEXTVAL (\'alarms_id_seq\');')
-    """
     cur.execute('CREATE SEQUENCE alarms_change_id_seq;')
     cur.execute('CREATE TABLE IF NOT EXISTS alarm_change ('
                 ' event_id bigserial PRIMARY KEY,'

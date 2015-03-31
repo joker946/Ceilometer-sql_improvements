@@ -52,10 +52,10 @@ def make_sql_query_from_filter(query, sample_filter,
             sql_where_body += subq_and.format('samples.timestamp < %s')
         values.append(ts_end)
     if sample_filter.user:
-        sql_where_body += subq_and.format('user_id = %s')
+        sql_where_body += subq_and.format('users.uuid = %s')
         values.append(sample_filter.user)
     if sample_filter.project:
-        sql_where_body += subq_and.format('projects_id = %s')
+        sql_where_body += subq_and.format('projects.uuid = %s')
         values.append(sample_filter.project)
     if sample_filter.resource:
         sql_where_body += subq_and.format('resources.resource_id = %s')

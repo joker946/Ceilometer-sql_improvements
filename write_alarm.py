@@ -17,6 +17,8 @@ def write_alarm():
             response = db.fetchone()
             if response:
                 user_id = response[0]
+            else:
+                raise Exception('Could not find required user_id.')
 
     if data['project_id']:
         project_id_query = 'SELECT id from projects WHERE uuid = %s'
@@ -25,6 +27,9 @@ def write_alarm():
             response = db.fetchone()
             if response:
                 project_id = response[0]
+            else:
+                raise Exception('Could not find required project_id.')
+
     values = [data['enabled'], data['name'], data['type'], data['description'],
               data['timestamp'], user_id, project_id, data['state'],
               data['ok_actions'], Json(data['alarm_actions']),

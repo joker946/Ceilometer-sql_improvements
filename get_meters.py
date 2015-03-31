@@ -64,7 +64,7 @@ def get_meters(user=None, project=None, resource=None, source=None,
     with PoolConnection() as cur:
         cur.execute(query, values)
         res = cur.fetchall()
-    print res
+    return res
 
 
-get_meters()
+print get_meters(user='3d622ea5-a70a-42d3-aae5-49ddfc1ef355', project='f2cc0bbd-0b72-4e41-b0b7-0059ea2b9f91')
