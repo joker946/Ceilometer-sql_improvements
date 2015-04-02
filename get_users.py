@@ -16,6 +16,6 @@ def get_users(source=None):
         else:
             cur.execute("SELECT uuid FROM users;")
         resp = make_list(cur.fetchall())
-    print resp
+    return resp
 
-get_users()
+print get_users()

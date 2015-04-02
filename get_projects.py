@@ -16,6 +16,6 @@ def get_projects(source=None):
         else:
             cur.execute("SELECT uuid FROM projects;")
         resp = make_list(cur.fetchall())
-    print resp
+    return resp
 
-get_projects()
+print get_projects()

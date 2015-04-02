@@ -4,6 +4,13 @@ from psycopg2.extras import Json
 import six
 
 
+def make_list(resp):
+    result = []
+    for r in resp:
+        result.append(r[0])
+    return result
+
+
 def make_metaquery(metastr, value):
     elements = metastr.split('.')[1:]
     if not elements:
@@ -113,7 +120,7 @@ def transform_filter(tree):
 
 def transform_orderby(orderby):
     return ' ORDER BY ' + ', '.join(['%s %s' % (x.keys()[0], x.values()[0])
-                                    for x in orderby])
+                                     for x in orderby])
 
 
 class Object(object):

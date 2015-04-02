@@ -1,7 +1,7 @@
 import plpy
 jdata = ''
 SD = {}
-#CREATE OR REPLACE FUNCTION write_sample (jdata text) RETURNS void AS $$
+CREATE OR REPLACE FUNCTION write_sample (jdata text) RETURNS void AS $$
     import json
     from plpy import spiexceptions
     from plpy import prepare as prep
@@ -90,4 +90,4 @@ SD = {}
                  [user_id, project_id, resource_id, meter_id, source_id,
                   data['timestamp'], data['message_id'], data['message_signature'],
                   data['counter_volume'], json.dumps(data['resource_metadata'])])
-#$$ language plpythonu;
+$$ language plpythonu;

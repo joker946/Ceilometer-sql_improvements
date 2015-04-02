@@ -12,9 +12,10 @@ def get_samples(sample_filter, limit=None):
    """
     if limit == 0:
         return []
-    query = ("SELECT sources.name as source_name, meters.name as meter_name,"
-             " meters.type, meters.unit, samples.volume,"
-             " users.uuid as user_id, projects.uuid as projects_id,"
+    query = ("SELECT sources.name as source_id, meters.name as counter_name,"
+             " meters.type as counter_type, meters.unit as counter_unit,"
+             " samples.volume as counter_volume,"
+             " users.uuid as user_id, projects.uuid as project_id,"
              " resources.resource_id, samples.message_id,"
              " samples.message_signature, samples.recorded_at,"
              " samples.metadata, samples.timestamp"
@@ -26,13 +27,27 @@ def get_samples(sample_filter, limit=None):
              " JOIN sources ON samples.source_id = sources.id")
     query, values = make_sql_query_from_filter(query, sample_filter, limit)
     query += ";"
-    # print query
-    # print values
     with PoolConnection() as cur:
         cur.execute(query, values)
         resp = cur.fetchall()
-    for x in resp:
-        print x.timestamp
+    for s in resp:
+        """
+        yield api_models.Sample(
+            source=s.source_id,
+            counter_name=s.counter_name,
+            counter_type=s.counter_type,
+            counter_unit=s.counter_unit,
+            counter_volume=s.counter_volume,
+            user_id=s.user_id,
+            project_id=s.project_id,
+            resource_id=s.resource_id,
+            timestamp=s.timestamp,
+            recorded_at=s.recorded_at,
+            resource_metadata=s.resource_metadata,
+            message_id=s.message_id,
+            message_signature=s.message_signature,
+        )
+        """
     return resp
 
 
@@ -43,7 +58,7 @@ sample_filter.meter = 'cpu'
 sample_filter.source = 'openstack'
 sample_filter.start = dt
 sample_filter.start_timestamp_op = 'ge'
-sample_filter.end = dt1
+sample_filter.end = None
 sample_filter.end_timestamp_op = 'lt'
 sample_filter.user = None
 sample_filter.project = None
