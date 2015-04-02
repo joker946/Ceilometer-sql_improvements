@@ -34,14 +34,15 @@ def write_alarm():
               data['timestamp'], user_id, project_id, data['state'],
               data['ok_actions'], Json(data['alarm_actions']),
               data['insufficient_data_actions'], data['repeat_actions'],
-              data['rule'], data['time_constraints'], data['state_timestamp']]
+              data['rule'], data['time_constraints'], data['state_timestamp'],
+              data['alarm_id']]
     print values
     query = ('INSERT INTO alarm (enabled, name, type, description,'
              ' timestamp, user_id, project_id, state, ok_actions,'
              ' alarm_actions, insufficient_data_actions,'
              ' repeat_actions, rule,'
-             ' time_constraints, state_timestamp) VALUES (%s, %s, %s, %s, %s,'
-             ' %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);')
+             ' time_constraints, state_timestamp, alarm_id) VALUES (%s, %s,'
+             ' %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);')
     with PoolConnection() as db:
         db.execute(query, values)
 

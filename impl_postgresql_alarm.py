@@ -144,7 +144,7 @@ class Connection(base.Connection):
         project_id = None
         if data['user_id']:
             user_id_query = 'SELECT id from users WHERE uuid = %s'
-            with PoolConnection() as db:
+            with PoolConnection(self.conn_pool) as db:
                 db.execute(user_id_query, [data['user_id']])
                 response = db.fetchone()
                 if response:
@@ -154,7 +154,7 @@ class Connection(base.Connection):
 
         if data['project_id']:
             project_id_query = 'SELECT id from projects WHERE uuid = %s'
-            with PoolConnection() as db:
+            with PoolConnection(self.conn_pool) as db:
                 db.execute(project_id_query, [data['project_id']])
                 response = db.fetchone()
                 if response:
@@ -176,7 +176,7 @@ class Connection(base.Connection):
                  ' repeat_actions, rule,'
                  ' time_constraints, state_timestamp) VALUES (%s, %s, %s, %s,'
                  ' %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);')
-        with PoolConnection() as db:
+        with PoolConnection(self.conn_pool) as db:
             db.execute(query, values)
 
     def clear(self):
@@ -245,6 +245,21 @@ class Connection(base.Connection):
             db.execute(sql_query, values)
             res = db.fetchall()
         return (self._row_to_alarm_model(x) for x in res)
+
+    def record_alarm_change(self, alarm_change):
+        values = [alarm_change['event_id'], alarm_change['type'],
+                  Json(alarm_change['detail']), alarm_change['timestamp'],
+                  alarm_change['alarm_id'], alarm_change['project_id'],
+                  alarm_change['user_id']]
+        sql_query = ('INSERT INTO alarm_change (event_id, alarm_id,'
+                     ' on_behalf_of,'
+                     ' project_id, user_id, type, detail, timestamp)'
+                     ' SELECT %s, alarm.id, projects.id, projects.id,'
+                     ' users.id, %s, %s, %s FROM alarm, projects, users'
+                     ' WHERE alarm.alarm_id = %s AND projects.uuid = %s AND'
+                     ' users.uuid = %s')
+        with PoolConnection(self.conn_pool) as db:
+            db.execute(sql_query, values)
 
     @classmethod
     def get_capabilities(cls):

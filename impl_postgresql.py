@@ -42,39 +42,29 @@ LOG = log.getLogger(__name__)
 
 
 AVAILABLE_CAPABILITIES = {
-    'meters': {'pagination': True,
-               'query': {'simple': True,
-                         'metadata': True,
-                         'complex': True}},
-    'resources': {'pagination': True,
-                  'query': {'simple': True,
-                            'metadata': True,
-                            'complex': True}},
+    'meters': {'query': {'simple': True,
+                         'metadata': True}},
+    'resources': {'query': {'simple': True,
+                            'metadata': True}},
     'samples': {'pagination': True,
                 'groupby': True,
                 'query': {'simple': True,
                           'metadata': True,
                           'complex': True}},
-    'statistics': {'pagination': False,
-                   'groupby': False,
-                   'query': {'simple': False,
-                             'metadata': False,
-                             'complex': False},
-                   'aggregation': {'standard': False,
+    'statistics': {'groupby': True,
+                   'query': {'simple': True,
+                             'metadata': True},
+                   'aggregation': {'standard': True,
                                    'selectable': {
-                                       'max': False,
-                                       'min': False,
-                                       'sum': False,
-                                       'avg': False,
-                                       'count': False,
-                                       'stddev': False,
-                                       'cardinality': False}}
+                                       'max': True,
+                                       'min': True,
+                                       'sum': True,
+                                       'avg': True,
+                                       'count': True,
+                                       'stddev': True,
+                                       'cardinality': True}}
                    },
-    'alarms': {'query': {'simple': False,
-                         'complex': False},
-               'history': {'query': {'simple': False,
-                                     'complex': False}}},
-    'events': {'query': {'simple': False}},
+    'events': {'query': {'simple': True}},
 }
 
 AVAILABLE_STORAGE_CAPABILITIES = {
@@ -262,20 +252,7 @@ class Connection(base.Connection):
         """Migrate the database to `version` or the most recent version."""
         with PoolConnection(self.conn_pool) as db:
             db.execute("""
-                      drop function if exists insert_ignore(int);
-                      create function insert_ignore(int)
-                      returns void
-                      as $$
-                      begin
-                      perform 1 from tbl where a = $1;
-                      if not found then
-                          begin
-                              insert into tbl (a, b) values ($1, 'abc');
-                          exception when unique_violation then
-                          end;
-                      end if;
-                      end
-                      $$ language plpgsql;)
+                      
                       """)
 
     def record_metering_data(self, data):
@@ -286,7 +263,11 @@ class Connection(base.Connection):
 
         All timestamps must be naive utc datetime object.
         """
-        d = json.dumps(data)
+        dthandler = lambda obj: obj.isoformat() if isinstance(
+            obj, datetime.datetime) else None
+        if not data['user_id']:
+            data['user_id'] = 'NULL'
+        d = json.dumps(data, ensure_ascii=False, default=dthandler)
         LOG.debug(_("---------"))
         LOG.debug(_(d))
         with PoolConnection(self.conn_pool) as db:
