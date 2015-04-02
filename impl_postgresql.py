@@ -287,6 +287,8 @@ class Connection(base.Connection):
         All timestamps must be naive utc datetime object.
         """
         d = json.dumps(data)
+        LOG.debug(_("---------"))
+        LOG.debug(_(d))
         with PoolConnection(self.conn_pool) as db:
             db.execute('SELECT \"write_sample\"(%s);', (d,))
 
@@ -303,13 +305,12 @@ class Connection(base.Connection):
         with PoolConnection(self.conn_pool) as db:
             db.execute(query, [date])
 
-    @staticmethod
-    def get_users(source=None):
+    def get_users(self, source=None):
         """Return an iterable of user id strings.
 
        :param source: Optional source filter.
        """
-        with PoolConnection() as cur:
+        with PoolConnection(self.conn_pool) as cur:
             if source:
                 cur.execute("SELECT uuid FROM users WHERE source_id=%s;",
                             (source,))
@@ -318,13 +319,12 @@ class Connection(base.Connection):
             resp = make_list(cur.fetchall())
         return resp
 
-    @staticmethod
-    def get_projects(source=None):
+    def get_projects(self, source=None):
         """Return an iterable of project id strings.
 
         :param source: Optional source filter.
         """
-        with PoolConnection() as cur:
+        with PoolConnection(self.conn_pool) as cur:
             if source:
                 cur.execute("SELECT uuid FROM projects WHERE source_id=%s;",
                             (source,))
@@ -354,8 +354,7 @@ class Connection(base.Connection):
        """
         raise NotImplementedError('Resources not implemented')
 
-    @staticmethod
-    def get_meters(user=None, project=None, resource=None, source=None,
+    def get_meters(self, user=None, project=None, resource=None, source=None,
                    metaquery={}, pagination=None):
         """Return an iterable of model.Meter instances containing meter
          information.
@@ -396,7 +395,7 @@ class Connection(base.Connection):
         query = query.format(subq)
         query += " ORDER BY meter_id;"
         print query
-        with PoolConnection() as cur:
+        with PoolConnection(self.conn_pool) as cur:
             cur.execute(query, values)
             res = cur.fetchall()
         for row in res:
@@ -409,8 +408,7 @@ class Connection(base.Connection):
                 source=row.source_id,
                 user_id=row.user_id)
 
-    @staticmethod
-    def get_samples(sample_filter, limit=None):
+    def get_samples(self, sample_filter, limit=None):
         """Return an iterable of model.Sample instances.
 
         :param sample_filter: Filter.
@@ -431,7 +429,7 @@ class Connection(base.Connection):
                  " JOIN sources ON samples.source_id = sources.id")
         query, values = make_sql_query_from_filter(query, sample_filter, limit)
         query += ";"
-        with PoolConnection() as cur:
+        with PoolConnection(self.conn_pool) as cur:
             cur.execute(query, values)
             resp = cur.fetchall()
         for s in resp:
