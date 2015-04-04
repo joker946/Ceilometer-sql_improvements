@@ -6,7 +6,6 @@ from six import moves
 import math
 from oslo.utils import timeutils
 from dateutil import parser
-# from oslo.utils import timeutils
 # from sqlalchemy import func
 # from sqlalchemy import distinct
 # import ceilometer
@@ -198,7 +197,7 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
         # code, so here it is, admire! We're going to do one request to get
         # stats by period. We would like to use GROUP BY, but there's no
         # portable way to manipulate timestamp in SQL, so we can't.
-    for period_start, period_end in iter_period(
+    for period_start, period_end in base.iter_period(
             sample_filter.start or res.tsmin,
             sample_filter.end or res.tsmax,
             period):

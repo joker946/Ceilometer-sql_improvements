@@ -123,15 +123,18 @@ source_ins = SD.setdefault('source_ins',
                                 " RETURNING id", ['text']))
 source_id = upsert(source_sel, source_ins, 'id', [data['source']])
 
-user_sel = SD.setdefault('user_sel',
-                         prep("SELECT id FROM users WHERE"
-                              " uuid = $1 AND source_id = $2",
-                              ['uuid', 'bigint']))
-user_ins = SD.setdefault('user_ins',
-                         prep("INSERT INTO users (uuid, source_id)"
-                              " VALUES ($1, $2) RETURNING id",
-                              ['uuid', 'bigint']))
-user_id = upsert(user_sel, user_ins, 'id', [data['user_id'], source_id])
+if data['user_id']:
+    user_sel = SD.setdefault('user_sel',
+                             prep("SELECT id FROM users WHERE"
+                                  " uuid = $1 AND source_id = $2",
+                                  ['uuid', 'bigint']))
+    user_ins = SD.setdefault('user_ins',
+                             prep("INSERT INTO users (uuid, source_id)"
+                                  " VALUES ($1, $2) RETURNING id",
+                                  ['uuid', 'bigint']))
+    user_id = upsert(user_sel, user_ins, 'id', [data['user_id'], source_id])
+else:
+    user_id = None
 
 project_sel = SD.setdefault('project_sel',
                             prep("SELECT id FROM projects WHERE "
