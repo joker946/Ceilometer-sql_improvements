@@ -186,9 +186,9 @@ def _handle_complex_op(complex_op, nodes, values):
     for node in nodes:
         node_str = _transform_filter(node, values)
         items.append(node_str)
-    if complex_op is 'or':
+    if complex_op == 'or':
         return '(' + ' {} '.format(complex_op).join(items) + ')'
-    if complex_op is 'and':
+    if complex_op == 'and':
         return ' {} '.format(complex_op).join(items)
 
 
@@ -741,6 +741,54 @@ class Connection(base.Connection):
                         aggregate=aggregate
                     )
 
+    def query_samples(self, filter_expr=None, orderby=None, limit=None):
+        sql_query = ('SELECT * FROM ('
+                     'SELECT samples.id as sam_id,'
+                     ' meters.name as counter_name,'
+                     ' meters.type as counter_type,'
+                     ' meters.unit as counter_unit,'
+                     ' samples.volume as counter_volume,'
+                     ' resources.resource_id,'
+                     ' sources.name as source_id, users.uuid as user_id,'
+                     ' projects.uuid as project_id,'
+                     ' samples.metadata as metadata,'
+                     ' resources.id, samples.timestamp, samples.message_id,'
+                     ' samples.message_signature, samples.recorded_at'
+                     ' FROM samples'
+                     ' JOIN meters ON samples.meter_id = meters.id'
+                     ' JOIN resources ON samples.resource_id = resources.id'
+                     ' JOIN users ON samples.user_id = users.id'
+                     ' JOIN projects ON samples.project_id = projects.id'
+                     ' JOIN sources ON samples.source_id = sources.id) as c')
+        values = []
+        if filter_expr:
+            sql_where_body, values = transform_filter(filter_expr)
+            sql_query += sql_where_body
+        if orderby:
+            sql_query += transform_orderby(orderby)
+        if limit:
+            sql_query += ' LIMIT %s'
+            values.append(limit)
+        with PoolConnection(self.conn_pool) as db:
+            db.execute(sql_query, values)
+            res = db.fetchall()
+            for s in res:
+                yield api_models.Sample(
+                    source=s.source_id,
+                    counter_name=s.counter_name,
+                    counter_type=s.counter_type,
+                    counter_unit=s.counter_unit,
+                    counter_volume=s.counter_volume,
+                    user_id=s.user_id,
+                    project_id=s.project_id,
+                    resource_id=s.resource_id,
+                    timestamp=s.timestamp,
+                    recorded_at=s.recorded_at,
+                    resource_metadata=s.metadata,
+                    message_id=s.message_id,
+                    message_signature=s.message_signature,
+                )
+
     @staticmethod
     def get_alarms(name=None, user=None,
                    project=None, enabled=None, alarm_id=None, pagination=None):
@@ -844,18 +892,6 @@ class Connection(base.Connection):
        """
 
         raise NotImplementedError('Events not implemented.')
-
-    @staticmethod
-    def query_samples(filter_expr=None, orderby=None, limit=None):
-        """Return an iterable of model.Sample objects.
-
-       :param filter_expr: Filter expression for query.
-       :param orderby: List of field name and direction pairs for order by.
-       :param limit: Maximum number of results to return.
-       """
-
-        raise NotImplementedError('Complex query for samples '
-                                  'is not implemented.')
 
     @staticmethod
     def query_alarms(filter_expr=None, orderby=None, limit=None):

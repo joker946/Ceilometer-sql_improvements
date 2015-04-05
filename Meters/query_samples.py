@@ -22,6 +22,11 @@ obj_complex = {"and":
 
 orderby = [{"counter_volume": "DESC"}]
 
+q = {"and": [{"=": {"counter_name": "disk.read.bytes"}},
+             {"=": {"resource_id": "465e284e-7351-4130-b668-bfa7980969f4"}}]}
+q1 = {u'and': [{u'=': {u'counter_name': u'disk.read.bytes'}}, {
+    u'=': {u'resource_id': u'963412f3-326b-48bb-8df7-14619dd0deee'}}]}
+
 
 def query_samples(filter_expr=None, orderby=None, limit=None):
     sql_query = ('SELECT * FROM ('
@@ -72,4 +77,4 @@ def query_samples(filter_expr=None, orderby=None, limit=None):
                 )
             """
 
-query_samples(filter_expr=obj, orderby=orderby, limit=2)
+query_samples(filter_expr=q1)

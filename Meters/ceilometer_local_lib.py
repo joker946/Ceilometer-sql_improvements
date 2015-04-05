@@ -88,9 +88,9 @@ def _handle_complex_op(complex_op, nodes, values):
     for node in nodes:
         node_str = _transform_filter(node, values)
         items.append(node_str)
-    if complex_op is 'or':
+    if complex_op == 'or':
         return '(' + ' {} '.format(complex_op).join(items) + ')'
-    if complex_op is 'and':
+    if complex_op == 'and':
         return ' {} '.format(complex_op).join(items)
 
 
