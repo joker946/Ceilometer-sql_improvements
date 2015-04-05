@@ -51,7 +51,7 @@ def get_meters(user=None, project=None, resource=None, source=None,
              " JOIN samples ON meters.id = samples.meter_id"
              " JOIN ({0}) as a ON samples.id = a.id"
              " JOIN resources ON samples.resource_id = resources.id"
-             " JOIN users ON samples.user_id = users.id"
+             " LEFT JOIN users ON samples.user_id = users.id"
              " JOIN sources ON samples.source_id = sources.id"
              " JOIN projects ON samples.project_id = projects.id")
     query, values = make_sql_query_from_filter(query, s_filter,
@@ -67,4 +67,4 @@ def get_meters(user=None, project=None, resource=None, source=None,
     return res
 
 
-print get_meters(user='3d622ea5-a70a-42d3-aae5-49ddfc1ef355', project='f2cc0bbd-0b72-4e41-b0b7-0059ea2b9f91')
+print get_meters()

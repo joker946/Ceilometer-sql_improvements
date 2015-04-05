@@ -173,10 +173,10 @@ def make_sql_query_from_filter(query, sample_filter,
         sql_where_body += subq_and.format(q)
         values.append(v)
     if limit:
-        query += " LIMIT %s"
+        sql_limit_body = " LIMIT %s"
         values.append(limit)
     sql_where_body = sql_where_body.replace(' AND', ' WHERE', 1)
-    query += sql_where_body
+    query = query + sql_where_body + sql_limit_body
     return query, values
 complex_operators = ['and', 'or', 'not']
 
@@ -286,7 +286,6 @@ def _make_stats_query(sample_filter, groupby, aggregate):
                                       for g in groupby])
         sql_select += ', {}'.format(group_attributes)
     sql_select += ";"
-    print sql_select
     return sql_select, values
 
 
@@ -382,7 +381,6 @@ class Connection(base.Connection):
 
         """
         date = datetime.datetime.now() - datetime.timedelta(seconds=ttl)
-        print date
         query = "DELETE FROM samples WHERE samples.timestamp < %s;"
         with PoolConnection(self.conn_pool) as db:
             db.execute(query, [date])
@@ -594,7 +592,7 @@ class Connection(base.Connection):
                  " JOIN samples ON meters.id = samples.meter_id"
                  " JOIN ({0}) as a ON samples.id = a.id"
                  " JOIN resources ON samples.resource_id = resources.id"
-                 " JOIN users ON samples.user_id = users.id"
+                 " LEFT JOIN users ON samples.user_id = users.id"
                  " JOIN sources ON samples.source_id = sources.id"
                  " JOIN projects ON samples.project_id = projects.id")
         query, values = make_sql_query_from_filter(query, s_filter,
@@ -603,7 +601,6 @@ class Connection(base.Connection):
             values = [resource] + values
         query = query.format(subq)
         query += " ORDER BY meter_id;"
-        print query
         with PoolConnection(self.conn_pool) as cur:
             cur.execute(query, values)
             res = cur.fetchall()
@@ -623,7 +620,8 @@ class Connection(base.Connection):
         :param sample_filter: Filter.
         :param limit: Maximum number of results to return.
         """
-        query = ("SELECT sources.name as source_id, meters.name as counter_name,"
+        query = ("SELECT sources.name as source_id,"
+                 " meters.name as counter_name,"
                  " meters.type as counter_type, meters.unit as counter_unit,"
                  " samples.volume as counter_volume,"
                  " users.uuid as user_id, projects.uuid as project_id,"
@@ -671,24 +669,22 @@ class Connection(base.Connection):
                                                          'these fields')
         if not period:
             q, v = _make_stats_query(sample_filter, groupby, aggregate)
-            with PoolConnection(self.conn_pool) as cur:
-                cur.execute(q, v)
-                result = cur.fetchall()
+            with PoolConnection(self.conn_pool) as db:
+                db.execute(q, v)
+                result = db.fetchall()
             if result:
                 for res in result:
                     yield _stats_result_to_model(res, 0,
                                                  res.tsmin, res.tsmax,
                                                  groupby,
                                                  aggregate)
-            cur.close()
             return
 
         if not sample_filter.start or not sample_filter.end:
             q, v = _make_stats_query(sample_filter, None, aggregate)
-            with PoolConnection(self.conn_pool) as cur:
-                cur.execute(q, v)
-                result = cur.fetchone()
-            res = result
+            with PoolConnection(self.conn_pool) as db:
+                db.execute(q, v)
+                res = db.fetchone()
             if not res:
                     # NOTE(liusheng):The 'res' may be NoneType, because no
                     # sample has found with sample filter(s).
@@ -728,22 +724,22 @@ class Connection(base.Connection):
                     values_to_delete.append(d)
             for i in values_to_delete:
                 values.remove(i)
-            values_to_add.append(period_start)
-            values_to_add.append(period_end)
+            values_to_add.extend([period_start, period_end])
 
-            with PoolConnection(self.conn_pool) as cur:
-                cur.execute(query, values + values_to_add)
-                result = cur.fetchone()
-            if result:
-                yield _stats_result_to_model(
-                    result=result,
-                    period=int(timeutils.delta_seconds(period_start,
-                                                       period_end)),
-                    period_start=period_start,
-                    period_end=period_end,
-                    groupby=groupby,
-                    aggregate=aggregate
-                )
+            with PoolConnection(self.conn_pool) as db:
+                db.execute(query, values + values_to_add)
+                results = db.fetchall()
+            if results:
+                for result in results:
+                    yield _stats_result_to_model(
+                        result=result,
+                        period=int(timeutils.delta_seconds(period_start,
+                                                           period_end)),
+                        period_start=period_start,
+                        period_end=period_end,
+                        groupby=groupby,
+                        aggregate=aggregate
+                    )
 
     @staticmethod
     def get_alarms(name=None, user=None,

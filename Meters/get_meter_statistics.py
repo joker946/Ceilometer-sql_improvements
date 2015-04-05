@@ -197,7 +197,7 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
         # code, so here it is, admire! We're going to do one request to get
         # stats by period. We would like to use GROUP BY, but there's no
         # portable way to manipulate timestamp in SQL, so we can't.
-    for period_start, period_end in base.iter_period(
+    for period_start, period_end in iter_period(
             sample_filter.start or res.tsmin,
             sample_filter.end or res.tsmax,
             period):
@@ -231,17 +231,18 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
 
         with PoolConnection() as cur:
             cur.execute(query, values + values_to_add)
-            result = cur.fetchone()
-        if result:
-            yield _stats_result_to_model(
-                result=result,
-                period=int(timeutils.delta_seconds(period_start,
-                                                   period_end)),
-                period_start=period_start,
-                period_end=period_end,
-                groupby=groupby,
-                aggregate=aggregate
-            )
+            results = cur.fetchall()
+        if results:
+            for result in results:
+                yield _stats_result_to_model(
+                    result=result,
+                    period=int(timeutils.delta_seconds(period_start,
+                                                       period_end)),
+                    period_start=period_start,
+                    period_end=period_end,
+                    groupby=groupby,
+                    aggregate=aggregate
+                )
 
 # MOCK OBJECTS
 sample_filter = Object()

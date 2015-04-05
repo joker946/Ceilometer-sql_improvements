@@ -1,13 +1,12 @@
 import plpy
 jdata = ''
 SD = {}
-CREATE OR REPLACE FUNCTION write_sample (jdata text) RETURNS void AS $$
+CREATE OR REPLACE FUNCTION write_sample(jdata text) RETURNS void AS $$
     import json
     from plpy import spiexceptions
     from plpy import prepare as prep
 
     data = json.loads(jdata)
-
 
     def upsert(upd, ins, field, data):
         """ Upsert capabale function. Can do select-insert or update-insert,
@@ -29,17 +28,19 @@ CREATE OR REPLACE FUNCTION write_sample (jdata text) RETURNS void AS $$
                                prep("INSERT INTO sources (name) VALUES ($1)"
                                     " RETURNING id", ['text']))
     source_id = upsert(source_sel, source_ins, 'id', [data['source']])
-
-    user_sel = SD.setdefault('user_sel',
-                             prep("SELECT id FROM users WHERE"
-                                  " uuid = $1 AND source_id = $2",
-                                  ['uuid', 'bigint']))
-    user_ins = SD.setdefault('user_ins',
-                             prep("INSERT INTO users (uuid, source_id)"
-                                  " VALUES ($1, $2) RETURNING id",
-                                  ['uuid', 'bigint']))
-    user_id = upsert(user_sel, user_ins, 'id', [data['user_id'], source_id])
-
+    if data['user_id']:
+        user_sel = SD.setdefault('user_sel',
+                                 prep("SELECT id FROM users WHERE"
+                                      " uuid = $1 AND source_id = $2",
+                                      ['uuid', 'bigint']))
+        user_ins = SD.setdefault('user_ins',
+                                 prep("INSERT INTO users (uuid, source_id)"
+                                      " VALUES ($1, $2) RETURNING id",
+                                      ['uuid', 'bigint']))
+        user_id = upsert(
+            user_sel, user_ins, 'id', [data['user_id'], source_id])
+    else:
+        user_id = None
     project_sel = SD.setdefault('project_sel',
                                 prep("SELECT id FROM projects WHERE "
                                      "uuid = $1 AND source_id = $2",
@@ -88,6 +89,13 @@ CREATE OR REPLACE FUNCTION write_sample (jdata text) RETURNS void AS $$
                                      'double precision', 'jsonb']))
     plpy.execute(sample_ins,
                  [user_id, project_id, resource_id, meter_id, source_id,
-                  data['timestamp'], data['message_id'], data['message_signature'],
+                  data['timestamp'], data['message_id'], data[
+                      'message_signature'],
                   data['counter_volume'], json.dumps(data['resource_metadata'])])
 $$ language plpythonu;
+
+
+CREATE OR REPLACE FUNCTION print_json_test(jdata json) RETURNS integer AS $$
+    import json
+    return jdata['func']
+$$ language plpythonu
