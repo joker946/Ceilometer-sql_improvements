@@ -365,8 +365,6 @@ class Connection(base.Connection):
         """
         dthandler = lambda obj: obj.isoformat() if isinstance(
             obj, datetime.datetime) else None
-        if not data['user_id']:
-            data['user_id'] = '2c9ffd7a-ee60-406c-bd3a-85ef8911a33a'
         d = json.dumps(data, ensure_ascii=False, default=dthandler)
         LOG.debug(_("---------"))
         LOG.debug(_(d))
@@ -630,7 +628,7 @@ class Connection(base.Connection):
                  " samples.metadata, samples.timestamp"
                  " FROM samples"
                  " JOIN meters ON samples.meter_id = meters.id"
-                 " JOIN users ON samples.user_id = users.id"
+                 " LEFT JOIN users ON samples.user_id = users.id"
                  " JOIN projects ON samples.project_id = projects.id"
                  " JOIN resources ON samples.resource_id = resources.id"
                  " JOIN sources ON samples.source_id = sources.id")

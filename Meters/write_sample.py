@@ -52,19 +52,41 @@ CREATE OR REPLACE FUNCTION write_sample(jdata text) RETURNS void AS $$
     project_id = upsert(project_sel, project_ins, 'id',
                         [data['project_id'], source_id])
 
-    resource_sel = SD.setdefault('resource_sel',
-                                 prep("SELECT id FROM resources WHERE "
-                                      "resource_id = $1 AND user_id = $2 AND"
-                                      " project_id = $3 AND source_id = $4",
-                                      ['text', 'bigint', 'bigint', 'bigint']))
     resource_ins = SD.setdefault('resource_ins',
                                  prep("INSERT INTO resources"
                                       " (resource_id, user_id, project_id,"
                                       " source_id)"
                                       " VALUES ($1, $2, $3, $4) RETURNING id",
                                       ['text', 'bigint', 'bigint', 'bigint']))
-    resource_id = upsert(resource_sel, resource_ins, 'id',
-                         [data['resource_id'], user_id, project_id, source_id])
+
+    if data['user_id']:
+        resource_ins = SD.setdefault('resource_ins_userid',
+                                     prep("INSERT INTO resources"
+                                          " (resource_id, user_id, project_id,"
+                                          " source_id)"
+                                          " VALUES ($1, $2, $3, $4) RETURNING id",
+                                          ['text', 'bigint', 'bigint', 'bigint']))
+        resource_sel = SD.setdefault('resource_sel_userid',
+                                     prep("SELECT id FROM resources WHERE "
+                                          "resource_id = $1 AND user_id = $2 AND"
+                                          " project_id = $3 AND source_id = $4",
+                                          ['text', 'bigint', 'bigint', 'bigint']))
+        resource_id = upsert(resource_sel, resource_ins, 'id',
+                             [data['resource_id'], user_id, project_id, source_id])
+    else:
+        resource_ins = SD.setdefault('resource_ins_without_userid',
+                                     prep("INSERT INTO resources"
+                                          " (resource_id, user_id, project_id,"
+                                          " source_id)"
+                                          " VALUES ($1, null, $2, $3) RETURNING id",
+                                          ['text', 'bigint', 'bigint']))
+        resource_sel = SD.setdefault('resource_sel_without_userid',
+                                     prep("SELECT id FROM resources WHERE "
+                                          "resource_id = $1 AND user_id is null AND"
+                                          " project_id = $2 AND source_id = $3",
+                                          ['text', 'bigint', 'bigint']))
+        resource_id = upsert(resource_sel, resource_ins, 'id',
+                             [data['resource_id'], project_id, source_id])
 
     meter_sel = SD.setdefault('meter_sel',
                               prep("SELECT id FROM meters WHERE "
@@ -92,7 +114,7 @@ CREATE OR REPLACE FUNCTION write_sample(jdata text) RETURNS void AS $$
                   data['timestamp'], data['message_id'], data[
                       'message_signature'],
                   data['counter_volume'], json.dumps(data['resource_metadata'])])
-$$ language plpythonu;
+$$ language plpythonu
 
 
 CREATE OR REPLACE FUNCTION print_json_test(jdata json) RETURNS integer AS $$
