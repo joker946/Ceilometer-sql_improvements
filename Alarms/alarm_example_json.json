@@ -1,42 +1,42 @@
 {
-    "alarm_id": "9b50ae2f-01fa-4ffc-819d-eb30d4110fa0",
-    "alarm_actions": [
-        "log://"
+    'alarm_actions': [
+        u'log: //'
     ],
-    "ok_actions": [
+    'ok_actions': [
         
     ],
-    "description": "instance running hot",
-    "state": "ok",
-    "timestamp": "2015-03-29T22:33:07.851Z",
-    "enabled": false,
-    "state_timestamp": "2015-03-29T22:34:11.709Z",
-    "rule": {
-        "meter_name": "cpu_util",
-        "evaluation_periods": 3,
-        "period": 600,
-        "statistic": "avg",
-        "threshold": 70,
-        "query": [
+    'description': u'instancerunninghot',
+    'state': 'insufficientdata',
+    'timestamp': datetime.datetime(2015, 4, 7, 19, 20, 5, 859475),
+    'enabled': True,
+    'state_timestamp': datetime.datetime(2015, 4, 7, 19, 20, 5, 859475),
+    'rule': {
+        'meter_name': u'cpu_util',
+        'evaluation_periods': 3,
+        'period': 600,
+        'statistic': 'avg',
+        'threshold': 70.0,
+        'query': [
             {
-                "field": "resource_id",
-                "type": "",
-                "value": "465e284e-7351-4130-b668-bfa7980969f4",
-                "op": "eq"
+                'field': u'resource_id',
+                'type': u'',
+                'value': u'465e284e-7351-4130-b668-bfa7980969f4',
+                'op': 'eq'
             }
         ],
-        "comparison_operator": "gt",
-        "exclude_outliers": false
+        'comparison_operator': 'gt',
+        'exclude_outliers': False
     },
-    "time_constraints": [
+    'alarm_id': u'81ac9221-e5e3-4a56-bbc6-7d533e271a58',
+    'time_constraints': [
         
     ],
-    "insufficient_data_actions": [
+    'insufficient_data_actions': [
         
     ],
-    "repeat_actions": false,
-    "user_id": "3d622ea5a70a42d3aae549ddfc1ef355",
-    "project_id": "",
-    "type": "threshold",
-    "name": "cpu_high"
+    'repeat_actions': False,
+    'user_id': u'3d622ea5a70a42d3aae549ddfc1ef355',
+    'project_id': u'',
+    'type': 'threshold',
+    'name': u'cpu_high1'
 }

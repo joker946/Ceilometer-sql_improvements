@@ -365,8 +365,10 @@ class Connection(base.Connection):
         """
         dthandler = lambda obj: obj.isoformat() if isinstance(
             obj, datetime.datetime) else None
+        recieved_datetime = data['timestamp']
+        data['timestamp'] = recieved_datetime + datetime.timedelta(
+            seconds=(datetime.datetime.now() - datetime.datetime.utcnow()).seconds)
         d = json.dumps(data, ensure_ascii=False, default=dthandler)
-        LOG.debug(_("---------"))
         LOG.debug(_(d))
         with PoolConnection(self.conn_pool) as db:
             db.execute('SELECT \"write_sample\"(%s);', (d,))

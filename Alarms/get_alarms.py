@@ -23,7 +23,15 @@ def _row_to_alarm_model(row):
 
 def get_alarms(name=None, user=None, state=None, meter=None,
                project=None, enabled=None, alarm_id=None, pagination=None):
-    sql_query = 'SELECT * FROM alarm'
+    sql_query = ('SELECT alarm.alarm_id, alarm.enabled, alarm.type,'
+                 ' alarm.name, alarm.description, alarm.timestamp,'
+                 ' users.uuid as user_ids, projects.uuid as project_ids,'
+                 ' alarm.state, alarm.state_timestamp, alarm.ok_actions,'
+                 ' alarm.alarm_actions, alarm.insufficient_data_actions,'
+                 ' alarm.rule, alarm.time_constraints, alarm.repeat_actions'
+                 ' FROM alarm'
+                 ' LEFT JOIN users ON alarm.user_id = users.id'
+                 ' LEFT JOIN projects ON alarm.project_id = projects.id')
     values = []
     if name:
         sql_query += ' AND name = %s'
@@ -32,25 +40,11 @@ def get_alarms(name=None, user=None, state=None, meter=None,
         sql_query += ' AND enabled = %s'
         values.append(enabled)
     if user:
-        subq = 'SELECT id FROM users WHERE uuid = %s'
-        with PoolConnection() as db:
-            db.execute(subq, [user])
-            res = db.fetchone()
-        if res:
-            values.append(res[0])
-        else:
-            raise Exception('Could not find any users with requested uuid')
-        sql_query += ' AND user_id = %s'
+        sql_query += ' AND users.uuid = %s'
+        values.append(user)
     if project:
-        subq = 'SELECT id FROM projects WHERE uuid = %s'
-        with PoolConnection() as db:
-            db.execute(subq, [project])
-            res = db.fetchone()
-        if res:
-            values.append(res[0])
-        else:
-            raise Exception('Could not find any projects with requested uuid')
-        sql_query += ' AND project_id = %s'
+        sql_query += ' AND projects.uuid = %s'
+        values.append(project)
     if alarm_id:
         sql_query += ' AND alarm_id = %s'
         values.append(alarm_id)
