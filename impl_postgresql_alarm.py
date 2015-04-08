@@ -166,8 +166,8 @@ class Connection(base.Connection):
                      ' users.uuid as user_id, projects.uuid as project_id,'
                      ' alarm.state, alarm.state_timestamp, alarm.ok_actions,'
                      ' alarm.alarm_actions, alarm.insufficient_data_actions,'
-                     ' alarm.rule, alarm.time_constraints, alarm.repeat_actions'
-                     ' FROM alarm'
+                     ' alarm.rule, alarm.time_constraints,'
+                     ' alarm.repeat_actions FROM alarm'
                      ' LEFT JOIN users ON alarm.user_id = users.id'
                      ' LEFT JOIN projects ON alarm.project_id = projects.id')
         values = []

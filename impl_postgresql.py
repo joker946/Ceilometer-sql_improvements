@@ -366,7 +366,6 @@ class Connection(base.Connection):
         """
         dthandler = lambda obj: obj.isoformat() if isinstance(
             obj, datetime.datetime) else None
-        LOG.debug(_(data))
         recieved_datetime = data['timestamp']
         data['timestamp'] = recieved_datetime + datetime.timedelta(
             seconds=(datetime.datetime.now() - datetime.datetime.utcnow()).seconds)
