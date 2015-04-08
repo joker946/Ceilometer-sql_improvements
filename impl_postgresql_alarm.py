@@ -17,7 +17,6 @@
 """SQLAlchemy storage backend."""
 
 from __future__ import absolute_import
-import os
 
 from eventlet.db_pool import ConnectionPool
 from eventlet.support.psycopg2_patcher import make_psycopg_green
@@ -25,13 +24,12 @@ make_psycopg_green()
 
 import psycopg2
 import json
+import datetime
 
 from psycopg2.extras import NamedTupleCursor
 from psycopg2.extras import Json
 
 from oslo.config import cfg
-from oslo.db.sqlalchemy import session as db_session
-from sqlalchemy import desc
 
 import ceilometer
 from ceilometer.alarm.storage import base
@@ -138,6 +136,69 @@ class Connection(base.Connection):
     def upgrade(self):
         raise ceilometer.NotImplementedError('Upgrade not implemented')
 
+    def clear(self):
+        raise ceilometer.NotImplementedError('Clear not implemented')
+
+    @staticmethod
+    def _row_to_alarm_model(row, project_id=None, user_id=None):
+        return alarm_api_models.Alarm(alarm_id=row.alarm_id,
+                                      enabled=row.enabled,
+                                      type=row.type,
+                                      name=row.name,
+                                      description=row.description,
+                                      timestamp=row.timestamp,
+                                      user_id=user_id or row.user_id,
+                                      project_id=project_id or row.project_id,
+                                      state=row.state,
+                                      state_timestamp=row.state_timestamp,
+                                      ok_actions=row.ok_actions,
+                                      alarm_actions=row.alarm_actions,
+                                      insufficient_data_actions=(
+                                          row.insufficient_data_actions),
+                                      rule=row.rule,
+                                      time_constraints=row.time_constraints,
+                                      repeat_actions=row.repeat_actions)
+
+    def get_alarms(self, name=None, user=None, state=None, meter=None,
+                   project=None, enabled=None, alarm_id=None, pagination=None):
+        sql_query = ('SELECT alarm.alarm_id, alarm.enabled, alarm.type,'
+                     ' alarm.name, alarm.description, alarm.timestamp,'
+                     ' users.uuid as user_id, projects.uuid as project_id,'
+                     ' alarm.state, alarm.state_timestamp, alarm.ok_actions,'
+                     ' alarm.alarm_actions, alarm.insufficient_data_actions,'
+                     ' alarm.rule, alarm.time_constraints, alarm.repeat_actions'
+                     ' FROM alarm'
+                     ' LEFT JOIN users ON alarm.user_id = users.id'
+                     ' LEFT JOIN projects ON alarm.project_id = projects.id')
+        values = []
+        if name:
+            sql_query += ' AND name = %s'
+            values.append(name)
+        if enabled:
+            sql_query += ' AND enabled = %s'
+            values.append(enabled)
+        if user:
+            sql_query += ' AND users.uuid = %s'
+            values.append(user)
+        if project:
+            sql_query += ' AND projects.uuid = %s'
+            values.append(project)
+        if alarm_id:
+            sql_query += ' AND alarm_id = %s'
+            values.append(alarm_id)
+        if state:
+            sql_query += ' AND state = %s'
+            values.append(state)
+        sql_query = sql_query.replace(' AND', ' WHERE', 1)
+        with PoolConnection(self.conn_pool) as db:
+            db.execute(sql_query, values)
+            res = db.fetchall()
+        return (self._row_to_alarm_model(x) for x in res)
+
+    def delete_alarm(self, alarm_id):
+        with PoolConnection(self.conn_pool) as db:
+            db.execute('DELETE FROM alarm WHERE alarm_id = %s', [alarm_id])
+
     def create_alarm(self, alarm):
         data = alarm.as_dict()
         user_id = None
@@ -163,88 +224,81 @@ class Connection(base.Connection):
                     raise Exception('Could not find required project_id.')
 
         values = [data['enabled'], data['name'], data['type'],
-                  data['description'],
-                  data['timestamp'], user_id, project_id, data['state'],
-                  data['ok_actions'], Json(data['alarm_actions']),
-                  data['insufficient_data_actions'], data['repeat_actions'],
-                  data['rule'], data['time_constraints'],
-                  data['state_timestamp']]
-        print values
+                  data['description'], data['timestamp'], user_id, project_id,
+                  data['state'], Json(data['ok_actions']),
+                  Json(data['alarm_actions']),
+                  Json(data['insufficient_data_actions']),
+                  data['repeat_actions'], Json(data['rule']),
+                  Json(data['time_constraints']), data['state_timestamp'],
+                  data['alarm_id']]
         query = ('INSERT INTO alarm (enabled, name, type, description,'
                  ' timestamp, user_id, project_id, state, ok_actions,'
                  ' alarm_actions, insufficient_data_actions,'
                  ' repeat_actions, rule,'
-                 ' time_constraints, state_timestamp) VALUES (%s, %s, %s, %s,'
-                 ' %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);')
+                 ' time_constraints, state_timestamp, alarm_id) VALUES (%s,'
+                 ' %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'
+                 ' RETURNING enabled, name, type, description,'
+                 ' timestamp, user_id, project_id, state, ok_actions,'
+                 ' alarm_actions, insufficient_data_actions,'
+                 ' repeat_actions, rule,'
+                 ' time_constraints, state_timestamp, alarm_id;')
         with PoolConnection(self.conn_pool) as db:
             db.execute(query, values)
-
-    def clear(self):
-        raise ceilometer.NotImplementedError('Clear not implemented')
+            res = db.fetchone()
+        return self._row_to_alarm_model(res, project_id=data['project_id'], user_id=data['user_id'])
 
     @staticmethod
-    def _row_to_alarm_model(row):
-        return alarm_api_models.Alarm(alarm_id=row.alarm_id,
-                                      enabled=row.enabled,
-                                      type=row.type,
-                                      name=row.name,
-                                      description=row.description,
-                                      timestamp=row.timestamp,
-                                      user_id=row.user_id,
-                                      project_id=row.project_id,
-                                      state=row.state,
-                                      state_timestamp=row.state_timestamp,
-                                      ok_actions=row.ok_actions,
-                                      alarm_actions=row.alarm_actions,
-                                      insufficient_data_actions=(
-                                          row.insufficient_data_actions),
-                                      rule=row.rule,
-                                      time_constraints=row.time_constraints,
-                                      repeat_actions=row.repeat_actions)
+    def _row_to_alarm_change_model(row):
+        return alarm_api_models.AlarmChange(event_id=row.event_id,
+                                            alarm_id=row.alarm_id,
+                                            type=row.type,
+                                            detail=row.detail,
+                                            user_id=row.user_id,
+                                            project_id=row.project_id,
+                                            on_behalf_of=row.on_behalf_of,
+                                            timestamp=row.timestamp)
 
-    def get_alarms(self, name=None, user=None, state=None, meter=None,
-                   project=None, enabled=None, alarm_id=None, pagination=None):
-        sql_query = 'SELECT * FROM alarm'
+    def get_alarm_changes(self, alarm_id, on_behalf_of,
+                          user=None, project=None, type=None,
+                          start_timestamp=None, start_timestamp_op=None,
+                          end_timestamp=None, end_timestamp_op=None):
         values = []
-        if name:
-            sql_query += ' AND name = %s'
-            values.append(name)
-        if enabled:
-            sql_query += ' AND enabled = %s'
-            values.append(enabled)
-        if user:
-            subq = 'SELECT id FROM users WHERE uuid = %s'
-            with PoolConnection(self.conn_pool) as db:
-                db.execute(subq, [user])
-                res = db.fetchone()
-            if res:
-                values.append(res[0])
+        sql_query = ('SELECT alarm_change.event_id,'
+                     ' alarm.alarm_id, alarm_change.type,'
+                     ' alarm_change.detail, users.uuid as user_id,'
+                     ' p1.uuid as project_id, p2.uuid as on_behalf_of,'
+                     ' alarm_change.timestamp FROM alarm_change'
+                     ' JOIN alarm ON alarm_change.alarm_id = alarm.id'
+                     ' JOIN users ON alarm_change.user_id = users.id'
+                     ' JOIN projects p1 ON alarm_change.project_id = p1.id'
+                     ' JOIN projects p2 ON alarm_change.on_behalf_of = p2.id')
+        sql_query += ' WHERE alarm.alarm_id = %s'
+        values.append(alarm_id)
+        if on_behalf_of is not None:
+            sql_query += ' AND p2.uuid = %s'
+            values.append(on_behalf_of)
+        if project is not None:
+            sql_query += ' AND p1.uuid = %s'
+            values.append(project)
+        if type is not None:
+            sql_query += ' AND alarm_change.type = %s'
+            values.append(type)
+        if start_timestamp:
+            if start_timestamp_op == 'gt':
+                sql_query += ' AND alarm_change.timestamp > %s'
             else:
-                raise Exception('Could not find any users with requested uuid')
-            sql_query += ' AND user_id = %s'
-        if project:
-            subq = 'SELECT id FROM projects WHERE uuid = %s'
-            with PoolConnection(self.conn_pool) as db:
-                db.execute(subq, [project])
-                res = db.fetchone()
-            if res:
-                values.append(res[0])
+                sql_query += ' AND alarm_change.timestamp >= %s'
+            values.append(start_timestamp)
+        if end_timestamp:
+            if end_timestamp_op == 'lt':
+                sql_query += ' AND alarm_change.timestamp < %s'
             else:
-                raise Exception(
-                    'Could not find any projects with requested uuid')
-            sql_query += ' AND project_id = %s'
-        if alarm_id:
-            sql_query += ' AND alarm_id = %s'
-            values.append(alarm_id)
-        if state:
-            sql_query += ' AND state = %s'
-            values.append(state)
-
-        sql_query = sql_query.replace(' AND', ' WHERE', 1)
+                sql_query += ' AND alarm_change.timestamp <= %s'
+        sql_query += ' ORDER BY timestamp DESC;'
         with PoolConnection(self.conn_pool) as db:
             db.execute(sql_query, values)
             res = db.fetchall()
-        return (self._row_to_alarm_model(x) for x in res)
+        return (self._row_to_alarm_change_model(x) for x in res)
 
     def record_alarm_change(self, alarm_change):
         values = [alarm_change['event_id'], alarm_change['type'],

@@ -12,7 +12,7 @@ from dateutil import parser
 # from ceilometer import storage
 # from ceilometer.storage import base
 # from ceilometer.storage.sqlalchemy import models
-
+import pprint
 
 STANDARD_AGGREGATES = dict(
     avg='avg(samples.volume)',
@@ -203,16 +203,24 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
             period):
         values_to_add = []
         values_to_delete = []
+        print '1-----', query
+        if query.find(" samples.timestamp > %s") > -1:
+            query = query.replace(
+                " samples.timestamp > %s", " samples.timestamp >= %s")
+        if query.find(" samples.timestamp <= %s"):
+            query = query.replace(
+                " samples.timestamp <= %s", " samples.timestamp < %s")
 
-        if query.find(" samples.timestamp >=") == -1:
+        if query.find(" samples.timestamp >= %s") == -1:
             seq = [query[:query.index('GROUP BY') - 1],
                    query[query.index('GROUP BY'):]]
             query = ' AND samples.timestamp >= %s '.join(seq)
-        if query.find(" samples.timestamp <") == -1:
+        if query.find(" samples.timestamp < %s") == -1:
             seq = [query[:query.index('GROUP BY') - 1],
                    query[query.index('GROUP BY'):]]
             query = ' AND samples.timestamp < %s '.join(seq)
 
+        print '-----', query
         if sample_filter.end and not sample_filter.start:
             query = query.replace('AND samples.timestamp >= %s',
                                   'AND samples.timestamp < %s')
@@ -226,9 +234,8 @@ def get_meter_statistics(sample_filter, period=None, groupby=None,
                 values_to_delete.append(d)
         for i in values_to_delete:
             values.remove(i)
-        values_to_add.append(period_start)
-        values_to_add.append(period_end)
-
+        values_to_add.extend([period_start, period_end])
+        print values + values_to_add
         with PoolConnection() as cur:
             cur.execute(query, values + values_to_add)
             results = cur.fetchall()
@@ -253,8 +260,8 @@ dt1 = parser.parse("2015-03-16 14:31:52")
 sample_filter.start = None
 sample_filter.start_timestamp_op = 'ge'
 sample_filter.end = None
-sample_filter.end_timestamp_op = 'lt'
-sample_filter.user = None
+sample_filter.end_timestamp_op = 'le'
+sample_filter.user = '3d622ea5-a70a-42d3-aae5-49ddfc1ef355'
 sample_filter.project = None
 sample_filter.resource = None
 sample_filter.message_id = None
@@ -270,5 +277,5 @@ aggr2.func = 'avg'
 aggr2.param = None
 aggregate_list = [aggr1, aggr2]
 for stat in get_meter_statistics(sample_filter, groupby=group,
-                                 aggregate=None, period=3600):
-    print stat
+                                 aggregate=None, period=None):
+    pprint.pprint(stat)

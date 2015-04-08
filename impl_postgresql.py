@@ -132,6 +132,7 @@ def apply_metaquery_filter(metaquery):
 def make_sql_query_from_filter(query, sample_filter,
                                limit=None, require_meter=True):
     sql_where_body = ''
+    sql_limit_body = ''
     subq_and = ' AND {}'
     values = []
     if sample_filter.meter:
@@ -142,20 +143,6 @@ def make_sql_query_from_filter(query, sample_filter,
     if sample_filter.source:
         sql_where_body += subq_and.format('sources.name = %s')
         values.append(sample_filter.source)
-    if sample_filter.start:
-        ts_start = sample_filter.start
-        if sample_filter.start_timestamp_op == 'gt':
-            sql_where_body += subq_and.format('samples.timestamp > %s')
-        else:
-            sql_where_body += subq_and.format('samples.timestamp >= %s')
-        values.append(ts_start)
-    if sample_filter.end:
-        ts_end = sample_filter.end
-        if sample_filter.end_timestamp_op == 'le':
-            sql_where_body += subq_and.format('samples.timestamp <= %s')
-        else:
-            sql_where_body += subq_and.format('samples.timestamp < %s')
-        values.append(ts_end)
     if sample_filter.user:
         sql_where_body += subq_and.format('users.uuid = %s')
         values.append(sample_filter.user)
@@ -172,6 +159,20 @@ def make_sql_query_from_filter(query, sample_filter,
         q, v = apply_metaquery_filter(sample_filter.metaquery)
         sql_where_body += subq_and.format(q)
         values.append(v)
+    if sample_filter.start:
+        ts_start = sample_filter.start
+        if sample_filter.start_timestamp_op == 'gt':
+            sql_where_body += subq_and.format('samples.timestamp > %s')
+        else:
+            sql_where_body += subq_and.format('samples.timestamp >= %s')
+        values.append(ts_start)
+    if sample_filter.end:
+        ts_end = sample_filter.end
+        if sample_filter.end_timestamp_op == 'le':
+            sql_where_body += subq_and.format('samples.timestamp <= %s')
+        else:
+            sql_where_body += subq_and.format('samples.timestamp < %s')
+        values.append(ts_end)
     if limit:
         sql_limit_body = " LIMIT %s"
         values.append(limit)
@@ -365,9 +366,11 @@ class Connection(base.Connection):
         """
         dthandler = lambda obj: obj.isoformat() if isinstance(
             obj, datetime.datetime) else None
+        LOG.debug(_(data))
+        recieved_datetime = data['timestamp']
+        data['timestamp'] = recieved_datetime + datetime.timedelta(
+            seconds=(datetime.datetime.now() - datetime.datetime.utcnow()).seconds)
         d = json.dumps(data, ensure_ascii=False, default=dthandler)
-        LOG.debug(_("---------"))
-        LOG.debug(_(d))
         with PoolConnection(self.conn_pool) as db:
             db.execute('SELECT \"write_sample\"(%s);', (d,))
 
@@ -450,7 +453,7 @@ class Connection(base.Connection):
         subq_values = []
         samples_subq = ("SELECT resource_id, source_id, user_id, project_id,"
                         " max(timestamp) as max_ts, min(timestamp) as min_ts,"
-                        " metadata"
+                        " LAST(metadata) as metadata"
                         " FROM samples")
 
         if s_filter.resource:
@@ -532,7 +535,7 @@ class Connection(base.Connection):
             subq_values.append(v)
 
         samples_subq += (" GROUP BY resource_id, source_id,"
-                         " user_id, project_id, metadata")
+                         " user_id, project_id")
 
         samples_subq = samples_subq.replace(" AND", " WHERE", 1)
 
@@ -544,6 +547,7 @@ class Connection(base.Connection):
                  " JOIN users ON samples.user_id = users.id"
                  " JOIN projects ON samples.project_id = projects.id"
                  " JOIN sources ON samples.source_id = sources.id")
+
         query = query.format(samples_subq)
 
         with PoolConnection(self.conn_pool) as cur:
@@ -699,12 +703,17 @@ class Connection(base.Connection):
                 period):
             values_to_add = []
             values_to_delete = []
-
-            if query.find(" samples.timestamp >=") == -1:
+            if query.find(" samples.timestamp > %s") > -1:
+                query = query.replace(
+                    " samples.timestamp > %s", " samples.timestamp >= %s")
+            if query.find(" samples.timestamp <= %s"):
+                query = query.replace(
+                    " samples.timestamp <= %s", " samples.timestamp < %s")
+            if query.find(" samples.timestamp >= %s") == -1:
                 seq = [query[:query.index('GROUP BY') - 1],
                        query[query.index('GROUP BY'):]]
                 query = ' AND samples.timestamp >= %s '.join(seq)
-            if query.find(" samples.timestamp <") == -1:
+            if query.find(" samples.timestamp < %s") == -1:
                 seq = [query[:query.index('GROUP BY') - 1],
                        query[query.index('GROUP BY'):]]
                 query = ' AND samples.timestamp < %s '.join(seq)
@@ -755,11 +764,12 @@ class Connection(base.Connection):
                      ' FROM samples'
                      ' JOIN meters ON samples.meter_id = meters.id'
                      ' JOIN resources ON samples.resource_id = resources.id'
-                     ' JOIN users ON samples.user_id = users.id'
+                     ' LEFT JOIN users ON samples.user_id = users.id'
                      ' JOIN projects ON samples.project_id = projects.id'
                      ' JOIN sources ON samples.source_id = sources.id) as c')
         values = []
         if filter_expr:
+            LOG.debug(_(filter_expr))
             sql_where_body, values = transform_filter(filter_expr)
             sql_query += sql_where_body
         if orderby:

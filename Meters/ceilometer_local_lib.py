@@ -44,6 +44,22 @@ def make_sql_query_from_filter(query, sample_filter,
     if sample_filter.source:
         sql_where_body += subq_and.format('sources.name = %s')
         values.append(sample_filter.source)
+    if sample_filter.metaquery:
+        q, v = apply_metaquery_filter(sample_filter.metaquery)
+        sql_where_body += subq_and.format(q)
+        values.append(v)
+    if sample_filter.user:
+        sql_where_body += subq_and.format('users.uuid = %s')
+        values.append(sample_filter.user)
+    if sample_filter.project:
+        sql_where_body += subq_and.format('projects.uuid = %s')
+        values.append(sample_filter.project)
+    if sample_filter.resource:
+        sql_where_body += subq_and.format('resources.resource_id = %s')
+        values.append(sample_filter.resource)
+    if sample_filter.message_id:
+        sql_where_body += subq_and.format('samples.message_id = %s')
+        values.append(sample_filter.message_id)
     if sample_filter.start:
         ts_start = sample_filter.start
         if sample_filter.start_timestamp_op == 'gt':
@@ -58,22 +74,6 @@ def make_sql_query_from_filter(query, sample_filter,
         else:
             sql_where_body += subq_and.format('samples.timestamp < %s')
         values.append(ts_end)
-    if sample_filter.user:
-        sql_where_body += subq_and.format('users.uuid = %s')
-        values.append(sample_filter.user)
-    if sample_filter.project:
-        sql_where_body += subq_and.format('projects.uuid = %s')
-        values.append(sample_filter.project)
-    if sample_filter.resource:
-        sql_where_body += subq_and.format('resources.resource_id = %s')
-        values.append(sample_filter.resource)
-    if sample_filter.message_id:
-        sql_where_body += subq_and.format('samples.message_id = %s')
-        values.append(sample_filter.message_id)
-    if sample_filter.metaquery:
-        q, v = apply_metaquery_filter(sample_filter.metaquery)
-        sql_where_body += subq_and.format(q)
-        values.append(v)
     if limit:
         query += " LIMIT %s"
         values.append(limit)
