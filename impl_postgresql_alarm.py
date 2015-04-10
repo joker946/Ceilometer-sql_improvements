@@ -81,6 +81,119 @@ class PoolConnection(object):
         self._pool.put(self._conn)
 
 
+def make_metaquery(metastr, value):
+    elements = metastr.split('.')[1:]
+    if not elements:
+        return None
+    jsq = dict()
+    jsq_last = jsq
+    for e in elements[:-1]:
+        jsq_last[e] = dict()
+        jsq_last = jsq_last[e]
+    jsq_last[elements[-1]] = value
+    return jsq
+
+
+def apply_metaquery_filter(metaquery):
+    meta_filter = dict()
+    for key, value in six.iteritems(metaquery):
+        meta_filter.update(make_metaquery(key, value))
+    return ('metadata @> %s', Json(meta_filter))
+
+
+def make_sql_query_from_filter(query, sample_filter,
+                               limit=None, require_meter=True):
+    sql_where_body = ''
+    sql_limit_body = ''
+    subq_and = ' AND {}'
+    values = []
+    if sample_filter.meter:
+        sql_where_body += subq_and.format('meters.name = %s')
+        values.append(sample_filter.meter)
+    elif require_meter:
+        raise RuntimeError('Missing required meter specifier')
+    if sample_filter.source:
+        sql_where_body += subq_and.format('sources.name = %s')
+        values.append(sample_filter.source)
+    if sample_filter.user:
+        sql_where_body += subq_and.format('users.uuid = %s')
+        values.append(sample_filter.user)
+    if sample_filter.project:
+        sql_where_body += subq_and.format('projects.uuid = %s')
+        values.append(sample_filter.project)
+    if sample_filter.resource:
+        sql_where_body += subq_and.format('resources.resource_id = %s')
+        values.append(sample_filter.resource)
+    if sample_filter.message_id:
+        sql_where_body += subq_and.format('samples.message_id = %s')
+        values.append(sample_filter.message_id)
+    if sample_filter.metaquery:
+        q, v = apply_metaquery_filter(sample_filter.metaquery)
+        sql_where_body += subq_and.format(q)
+        values.append(v)
+    if sample_filter.start:
+        ts_start = sample_filter.start
+        if sample_filter.start_timestamp_op == 'gt':
+            sql_where_body += subq_and.format('samples.timestamp > %s')
+        else:
+            sql_where_body += subq_and.format('samples.timestamp >= %s')
+        values.append(ts_start)
+    if sample_filter.end:
+        ts_end = sample_filter.end
+        if sample_filter.end_timestamp_op == 'le':
+            sql_where_body += subq_and.format('samples.timestamp <= %s')
+        else:
+            sql_where_body += subq_and.format('samples.timestamp < %s')
+        values.append(ts_end)
+    if limit:
+        sql_limit_body = " LIMIT %s"
+        values.append(limit)
+    sql_where_body = sql_where_body.replace(' AND', ' WHERE', 1)
+    query = query + sql_where_body + sql_limit_body
+    return query, values
+complex_operators = ['and', 'or', 'not']
+
+
+def _handle_complex_op(complex_op, nodes, values):
+    items = []
+    for node in nodes:
+        node_str = _transform_filter(node, values)
+        items.append(node_str)
+    if complex_op == 'or':
+        return '(' + ' {} '.format(complex_op).join(items) + ')'
+    if complex_op == 'and':
+        return ' {} '.format(complex_op).join(items)
+
+
+def _handle_simple_op(simple_op, nodes, values):
+    if nodes.keys()[0].startswith('resource_metadata'):
+        q, v = apply_metaquery_filter(nodes)
+        values.append(v)
+        return q
+    values.append(nodes.values()[0])
+    return "%s %s %%s" % (nodes.keys()[0], simple_op)
+
+
+def _transform_filter(tree, values):
+    operator = tree.keys()[0]
+    nodes = tree.values()[0]
+    if operator in complex_operators:
+        return _handle_complex_op(operator, nodes, values)
+    else:
+        return _handle_simple_op(operator, nodes, values)
+
+
+def transform_filter(tree):
+    values = []
+    res = _transform_filter(tree, values)
+    return ' WHERE ' + res, values
+
+
+def transform_orderby(orderby):
+    return ' ORDER BY ' + ', '.join(['%s %s' % (x.keys()[0], x.values()[0])
+                                     for x in orderby])
+
+
 def get_connection_opts(conn):
     template = re.compile('[^:/@]+')
     result = template.findall(conn)
@@ -316,7 +429,7 @@ class Connection(base.Connection):
             else:
                 sql_query += ' AND alarm_change.timestamp <= %s'
         sql_query += ' ORDER BY timestamp DESC;'
-        with PoolConnection(self.conn_pool, cursor_factory=DictCursor) as db:
+        with PoolConnection(self.conn_pool) as db:
             db.execute(sql_query, values)
             res = db.fetchall()
         return (self._row_to_alarm_change_model(x) for x in res)
@@ -340,6 +453,58 @@ class Connection(base.Connection):
                      ' users.uuid = %s')
         with PoolConnection(self.conn_pool) as db:
             db.execute(sql_query, values)
+
+    def query_alarms(self, filter_expr=None, orderby=None, limit=None):
+        sql_query = ('SELECT * FROM ('
+                     'SELECT alarm.alarm_id, alarm.enabled, alarm.type,'
+                     ' alarm.name, alarm.description, alarm.timestamp,'
+                     ' users.uuid as user_id, projects.uuid as project_id,'
+                     ' alarm.state, alarm.state_timestamp, alarm.ok_actions,'
+                     ' alarm.alarm_actions, alarm.insufficient_data_actions,'
+                     ' alarm.rule, alarm.time_constraints,'
+                     ' alarm.repeat_actions FROM alarm'
+                     ' LEFT JOIN users ON alarm.user_id = users.id'
+                     ' LEFT JOIN projects ON alarm.project_id = projects.id'
+                     ') as c')
+        values = []
+        if filter_expr:
+            sql_where_body, values = transform_filter(filter_expr)
+            sql_query += sql_where_body
+        if orderby:
+            sql_query += transform_orderby(orderby)
+        if limit:
+            sql_query += ' LIMIT %s'
+            values.append(limit)
+        with PoolConnection(self.conn_pool, cursor_factory=DictCursor) as db:
+            db.execute(sql_query, values)
+            res = db.fetchall()
+        return (self._row_to_alarm_model(x) for x in res)
+
+    def query_alarm_history(self, filter_expr=None, orderby=None, limit=None):
+        sql_query = ('SELECT * FROM ('
+                     'SELECT alarm_change.event_id,'
+                     ' alarm.alarm_id, alarm_change.type,'
+                     ' alarm_change.detail, users.uuid as user_id,'
+                     ' p1.uuid as project_id, p2.uuid as on_behalf_of,'
+                     ' alarm_change.timestamp FROM alarm_change'
+                     ' JOIN alarm ON alarm_change.alarm_id = alarm.id'
+                     ' JOIN users ON alarm_change.user_id = users.id'
+                     ' JOIN projects p1 ON alarm_change.project_id = p1.id'
+                     ' JOIN projects p2 ON alarm_change.on_behalf_of = p2.id'
+                     ') as c')
+        values = []
+        if filter_expr:
+            sql_where_body, values = transform_filter(filter_expr)
+            sql_query += sql_where_body
+        if orderby:
+            sql_query += transform_orderby(orderby)
+        if limit:
+            sql_query += ' LIMIT %s'
+            values.append(limit)
+        with PoolConnection(self.conn_pool) as db:
+            db.execute(sql_query, values)
+            res = db.fetchall()
+        return (self._row_to_alarm_change_model(x) for x in res)
 
     @classmethod
     def get_capabilities(cls):

@@ -47,4 +47,4 @@ def query_alarms(filter_expr=None, orderby=None, limit=None):
             """
 
 
-query_alarms(filter_expr=obj)
+query_alarms(filter_expr=None)
