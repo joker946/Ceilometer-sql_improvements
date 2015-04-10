@@ -23,9 +23,8 @@ from eventlet.support.psycopg2_patcher import make_psycopg_green
 make_psycopg_green()
 
 import psycopg2
-import json
-import datetime
-
+import re
+from psycopg2.extras import NamedTupleCursor, DictCursor
 from psycopg2.extras import Json
 
 from oslo.config import cfg
@@ -55,12 +54,16 @@ class PoolConnection(object):
 
     """Wraps connection pool to ease of use with transactions"""
 
+    def __init__(self, pool, readonly=False, cursor_factory=None):
         self._pool = pool
         self._readonly = readonly
+        self._cursor_factory = (
+            NamedTupleCursor if not cursor_factory else cursor_factory)
 
     def __enter__(self):
         self._conn = self._pool.get()
         self._curr = self._conn.cursor(
+            cursor_factory=self._cursor_factory
         )
         if self._readonly:
             self._conn.autocommit = True
@@ -76,6 +79,21 @@ class PoolConnection(object):
             self._conn.rollback()
 
         self._pool.put(self._conn)
+
+
+def get_connection_opts(conn):
+    template = re.compile('[^:/@]+')
+    result = template.findall(conn)
+    try:
+        return {'db_engine': result[0], 'user': result[1],
+                'password': result[2], 'host': result[3],
+                'port': int(result[4]), 'database': result[5]}
+    except ValueError:
+        return {'db_engine': result[0], 'user': result[1],
+                'port': 5432, 'password': result[2],
+                'host': result[3], 'database': result[4]}
+    except IndexError:
+        return None
 
 
 class Connection(base.Connection):
@@ -114,21 +132,25 @@ class Connection(base.Connection):
     )
 
     def __init__(self, url):
-        self.conn_pool = self._get_connection_pool(None)
+        self.conn_pool = self._get_connection_pool()
 
     @staticmethod
-    def _get_connection_pool(db_conf):
+    def _get_connection_pool():
         """Returns connection pool to the database"""
-        return ConnectionPool(psycopg2,
-                              min_size=0,
-                              max_size=4,
-                              max_idle=10,
-                              connect_timeout=5,
-                              host='controller1',
-                              port=5432,
-                              user='ceilometer',
-                              password='ceilometer',
-                              database='ceilometer')
+        connection_dict = get_connection_opts(cfg.CONF.database.connection)
+        if connection_dict:
+            return ConnectionPool(psycopg2,
+                                  min_size=cfg.CONF.database.min_pool_size,
+                                  max_size=cfg.CONF.database.max_pool_size,
+                                  max_idle=cfg.CONF.database.idle_timeout,
+                                  connect_timeout=cfg.CONF.database.pool_timeout,
+                                  host=connection_dict['host'],
+                                  port=connection_dict['port'],
+                                  user=connection_dict['user'],
+                                  password=connection_dict['password'],
+                                  database=connection_dict['database'])
+        else:
+            raise Exception('Wrong connection string is set')
 
     def upgrade(self):
         raise ceilometer.NotImplementedError('Upgrade not implemented')
@@ -137,7 +159,24 @@ class Connection(base.Connection):
         raise ceilometer.NotImplementedError('Clear not implemented')
 
     @staticmethod
+    def _row_to_alarm_model(row):
+        return alarm_api_models.Alarm(alarm_id=row['alarm_id'],
+                                      enabled=row['enabled'],
+                                      type=row['type'],
+                                      name=row['name'],
+                                      description=row['description'],
+                                      timestamp=row['timestamp'],
+                                      user_id=row['user_id'],
+                                      project_id=row['project_id'],
+                                      state=row['state'],
+                                      state_timestamp=row['state_timestamp'],
+                                      ok_actions=row['ok_actions'],
+                                      alarm_actions=row['alarm_actions'],
                                       insufficient_data_actions=(
+                                          row['insufficient_data_actions']),
+                                      rule=row['rule'],
+                                      time_constraints=row['time_constraints'],
+                                      repeat_actions=row['repeat_actions'])
 
     def get_alarms(self, name=None, user=None, state=None, meter=None,
                    project=None, enabled=None, alarm_id=None, pagination=None):
@@ -170,6 +209,7 @@ class Connection(base.Connection):
             sql_query += ' AND state = %s'
             values.append(state)
         sql_query = sql_query.replace(' AND', ' WHERE', 1)
+        with PoolConnection(self.conn_pool, cursor_factory=DictCursor) as db:
             db.execute(sql_query, values)
             res = db.fetchall()
         return (self._row_to_alarm_model(x) for x in res)
@@ -221,8 +261,12 @@ class Connection(base.Connection):
                  ' alarm_actions, insufficient_data_actions,'
                  ' repeat_actions, rule,'
                  ' time_constraints, state_timestamp, alarm_id;')
+        with PoolConnection(self.conn_pool, cursor_factory=DictCursor) as db:
             db.execute(query, values)
             res = db.fetchone()
+        res['user_id'] = data['user_id']
+        res['project_id'] = data['project_id']
+        return self._row_to_alarm_model(res)
 
     @staticmethod
     def _row_to_alarm_change_model(row):
@@ -272,6 +316,7 @@ class Connection(base.Connection):
             else:
                 sql_query += ' AND alarm_change.timestamp <= %s'
         sql_query += ' ORDER BY timestamp DESC;'
+        with PoolConnection(self.conn_pool, cursor_factory=DictCursor) as db:
             db.execute(sql_query, values)
             res = db.fetchall()
         return (self._row_to_alarm_change_model(x) for x in res)
@@ -281,9 +326,15 @@ class Connection(base.Connection):
                   Json(alarm_change['detail']), alarm_change['timestamp'],
                   alarm_change['alarm_id'], alarm_change['project_id'],
                   alarm_change['user_id']]
+        with PoolConnection(self.conn_pool) as db:
+            db.execute('SELECT id FROM projects WHERE uuid = %s',
+                       [alarm_change['on_behalf_of']])
+            on_behalf_of_query = db.fetchone().id
+        values.insert(1, on_behalf_of_query)
         sql_query = ('INSERT INTO alarm_change (event_id, alarm_id,'
                      ' on_behalf_of,'
                      ' project_id, user_id, type, detail, timestamp)'
+                     ' SELECT %s, alarm.id, %s, projects.id,'
                      ' users.id, %s, %s, %s FROM alarm, projects, users'
                      ' WHERE alarm.alarm_id = %s AND projects.uuid = %s AND'
                      ' users.uuid = %s')
