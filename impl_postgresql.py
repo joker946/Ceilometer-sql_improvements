@@ -26,6 +26,7 @@ import psycopg2
 import json
 import datetime
 import six
+import re
 
 from psycopg2.extras import NamedTupleCursor
 from psycopg2.extras import Json
@@ -39,6 +40,7 @@ from ceilometer.storage import base
 from ceilometer.storage import models as api_models
 from ceilometer import utils
 from oslo.utils import timeutils
+from oslo.config import cfg
 LOG = log.getLogger(__name__)
 
 
@@ -321,6 +323,21 @@ def _stats_result_to_model(result, period, period_start,
     return api_models.Statistics(**stats_args)
 
 
+def get_connection_opts(conn):
+    template = re.compile('[^:/@]+')
+    result = template.findall(conn)
+    try:
+        return {'db_engine': result[0], 'user': result[1],
+                'password': result[2], 'host': result[3],
+                'port': int(result[4]), 'database': result[5]}
+    except ValueError:
+        return {'db_engine': result[0], 'user': result[1],
+                'port': 5432, 'password': result[2],
+                'host': result[3], 'database': result[4]}
+    except IndexError:
+        return None
+
+
 class Connection(base.Connection):
 
     """PostgreSQL connections."""
@@ -333,21 +350,25 @@ class Connection(base.Connection):
 
     def __init__(self, conf):
         """Constructor."""
-        self.conn_pool = self._get_connection_pool(None)
+        self.conn_pool = self._get_connection_pool()
 
     @staticmethod
-    def _get_connection_pool(db_conf):
+    def _get_connection_pool():
         """Returns connection pool to the database"""
-        return ConnectionPool(psycopg2,
-                              min_size=0,
-                              max_size=4,
-                              max_idle=10,
-                              connect_timeout=5,
-                              host='controller1',
-                              port=5432,
-                              user='ceilometer',
-                              password='ceilometer',
-                              database='ceilometer')
+        connection_dict = get_connection_opts(cfg.CONF.database.connection)
+        if connection_dict:
+            return ConnectionPool(psycopg2,
+                                  min_size=cfg.CONF.database.min_pool_size,
+                                  max_size=cfg.CONF.database.max_pool_size,
+                                  max_idle=cfg.CONF.database.idle_timeout,
+                                  connect_timeout=cfg.CONF.database.pool_timeout,
+                                  host=connection_dict['host'],
+                                  port=connection_dict['port'],
+                                  user=connection_dict['user'],
+                                  password=connection_dict['password'],
+                                  database=connection_dict['database'])
+        else:
+            raise Exception('Wrong connection string is set')
 
     def upgrade(self):
         """Migrate the database to `version` or the most recent version."""
@@ -636,7 +657,7 @@ class Connection(base.Connection):
                  " JOIN resources ON samples.resource_id = resources.id"
                  " JOIN sources ON samples.source_id = sources.id")
         query, values = make_sql_query_from_filter(query, sample_filter, limit)
-        query += ";"
+        query += " ORDER BY samples.timestamp ASC;"
         with PoolConnection(self.conn_pool) as cur:
             cur.execute(query, values)
             resp = cur.fetchall()
@@ -768,7 +789,6 @@ class Connection(base.Connection):
                      ' JOIN sources ON samples.source_id = sources.id) as c')
         values = []
         if filter_expr:
-            LOG.debug(_(filter_expr))
             sql_where_body, values = transform_filter(filter_expr)
             sql_query += sql_where_body
         if orderby:

@@ -1,5 +1,6 @@
 import psycopg2
 from psycopg2.extras import NamedTupleCursor
+from psycopg2.extras import DictCursor
 from psycopg2.extras import Json
 import six
 
@@ -129,13 +130,15 @@ class Object(object):
 
 class PoolConnection(object):
 
-    def __init__(self, readonly=False):
+    def __init__(self, readonly=False, cursor_factory=None):
         self._conn = psycopg2.connect("dbname=ceilometer user=alexchadin")
         self._readonly = readonly
+        self._cursor_factory = (
+            NamedTupleCursor if not cursor_factory else cursor_factory)
 
     def __enter__(self):
         self._cur = self._conn.cursor(
-            cursor_factory=NamedTupleCursor
+            cursor_factory=self._cursor_factory
         )
         if self._readonly:
             self._conn.autocommit = True

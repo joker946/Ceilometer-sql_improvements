@@ -44,7 +44,7 @@ def write_alarm():
         ],
         'repeat_actions': False,
         'user_id': u'3d622ea5a70a42d3aae549ddfc1ef355',
-        'project_id': u'',
+        'project_id': u'f2cc0bbd0b724e41b0b70059ea2b9f91',
         'type': 'threshold',
         'name': u'cpu_high1'
     }

@@ -26,7 +26,6 @@ import psycopg2
 import json
 import datetime
 
-from psycopg2.extras import NamedTupleCursor
 from psycopg2.extras import Json
 
 from oslo.config import cfg
@@ -56,14 +55,12 @@ class PoolConnection(object):
 
     """Wraps connection pool to ease of use with transactions"""
 
-    def __init__(self, pool, readonly=False):
         self._pool = pool
         self._readonly = readonly
 
     def __enter__(self):
         self._conn = self._pool.get()
         self._curr = self._conn.cursor(
-            cursor_factory=NamedTupleCursor
         )
         if self._readonly:
             self._conn.autocommit = True
@@ -140,24 +137,7 @@ class Connection(base.Connection):
         raise ceilometer.NotImplementedError('Clear not implemented')
 
     @staticmethod
-    def _row_to_alarm_model(row, project_id=None, user_id=None):
-        return alarm_api_models.Alarm(alarm_id=row.alarm_id,
-                                      enabled=row.enabled,
-                                      type=row.type,
-                                      name=row.name,
-                                      description=row.description,
-                                      timestamp=row.timestamp,
-                                      user_id=user_id or row.user_id,
-                                      project_id=project_id or row.project_id,
-                                      state=row.state,
-                                      state_timestamp=row.state_timestamp,
-                                      ok_actions=row.ok_actions,
-                                      alarm_actions=row.alarm_actions,
                                       insufficient_data_actions=(
-                                          row.insufficient_data_actions),
-                                      rule=row.rule,
-                                      time_constraints=row.time_constraints,
-                                      repeat_actions=row.repeat_actions)
 
     def get_alarms(self, name=None, user=None, state=None, meter=None,
                    project=None, enabled=None, alarm_id=None, pagination=None):
@@ -190,7 +170,6 @@ class Connection(base.Connection):
             sql_query += ' AND state = %s'
             values.append(state)
         sql_query = sql_query.replace(' AND', ' WHERE', 1)
-        with PoolConnection(self.conn_pool) as db:
             db.execute(sql_query, values)
             res = db.fetchall()
         return (self._row_to_alarm_model(x) for x in res)
@@ -242,10 +221,8 @@ class Connection(base.Connection):
                  ' alarm_actions, insufficient_data_actions,'
                  ' repeat_actions, rule,'
                  ' time_constraints, state_timestamp, alarm_id;')
-        with PoolConnection(self.conn_pool) as db:
             db.execute(query, values)
             res = db.fetchone()
-        return self._row_to_alarm_model(res, project_id=data['project_id'], user_id=data['user_id'])
 
     @staticmethod
     def _row_to_alarm_change_model(row):
@@ -295,7 +272,6 @@ class Connection(base.Connection):
             else:
                 sql_query += ' AND alarm_change.timestamp <= %s'
         sql_query += ' ORDER BY timestamp DESC;'
-        with PoolConnection(self.conn_pool) as db:
             db.execute(sql_query, values)
             res = db.fetchall()
         return (self._row_to_alarm_change_model(x) for x in res)
@@ -308,7 +284,6 @@ class Connection(base.Connection):
         sql_query = ('INSERT INTO alarm_change (event_id, alarm_id,'
                      ' on_behalf_of,'
                      ' project_id, user_id, type, detail, timestamp)'
-                     ' SELECT %s, alarm.id, projects.id, projects.id,'
                      ' users.id, %s, %s, %s FROM alarm, projects, users'
                      ' WHERE alarm.alarm_id = %s AND projects.uuid = %s AND'
                      ' users.uuid = %s')

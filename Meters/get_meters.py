@@ -1,7 +1,7 @@
 from ceilometer_local_lib import make_sql_query_from_filter
 from ceilometer_local_lib import PoolConnection
 from ceilometer_local_lib import Object
-
+from psycopg2.extras import DictCursor
 
 def get_meters(user=None, project=None, resource=None, source=None,
                metaquery=None, pagination=None):
@@ -61,10 +61,12 @@ def get_meters(user=None, project=None, resource=None, source=None,
     query = query.format(subq)
     query += " ORDER BY meter_id;"
     print query
-    with PoolConnection() as cur:
+    with PoolConnection(cursor_factory=DictCursor) as cur:
         cur.execute(query, values)
         res = cur.fetchall()
+    res[0]['user_id'] = 1
+    print res[0].user_id
     return res
 
 
-print get_meters()
+get_meters()
