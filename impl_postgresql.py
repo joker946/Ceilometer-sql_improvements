@@ -30,6 +30,7 @@ import re
 
 from psycopg2.extras import NamedTupleCursor
 from psycopg2.extras import Json
+from urlparse import urlparse
 
 import ceilometer
 from ceilometer.openstack.common.gettextutils import _
@@ -323,21 +324,6 @@ def _stats_result_to_model(result, period, period_start,
     return api_models.Statistics(**stats_args)
 
 
-def get_connection_opts(conn):
-    template = re.compile('[^:/@]+')
-    result = template.findall(conn)
-    try:
-        return {'db_engine': result[0], 'user': result[1],
-                'password': result[2], 'host': result[3],
-                'port': int(result[4]), 'database': result[5]}
-    except ValueError:
-        return {'db_engine': result[0], 'user': result[1],
-                'port': 5432, 'password': result[2],
-                'host': result[3], 'database': result[4]}
-    except IndexError:
-        return None
-
-
 class Connection(base.Connection):
 
     """PostgreSQL connections."""
@@ -355,18 +341,18 @@ class Connection(base.Connection):
     @staticmethod
     def _get_connection_pool():
         """Returns connection pool to the database"""
-        connection_dict = get_connection_opts(cfg.CONF.database.connection)
-        if connection_dict:
+        connection = urlparse(cfg.CONF.database.connection)
+        if connection:
             return ConnectionPool(psycopg2,
                                   min_size=cfg.CONF.database.min_pool_size,
                                   max_size=cfg.CONF.database.max_pool_size,
                                   max_idle=cfg.CONF.database.idle_timeout,
                                   connect_timeout=cfg.CONF.database.pool_timeout,
-                                  host=connection_dict['host'],
-                                  port=connection_dict['port'],
-                                  user=connection_dict['user'],
-                                  password=connection_dict['password'],
-                                  database=connection_dict['database'])
+                                  host=connection.hostname,
+                                  port=connection.port or 5432,
+                                  user=connection.username,
+                                  password=connection.password,
+                                  database=connection.path[1:])
         else:
             raise Exception('Wrong connection string is set')
 
