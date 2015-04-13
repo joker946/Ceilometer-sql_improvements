@@ -23,7 +23,6 @@ from eventlet.support.psycopg2_patcher import make_psycopg_green
 make_psycopg_green()
 
 import psycopg2
-import re
 from psycopg2.extras import NamedTupleCursor, DictCursor
 from psycopg2.extras import Json
 

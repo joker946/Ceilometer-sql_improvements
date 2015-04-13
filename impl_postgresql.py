@@ -26,7 +26,6 @@ import psycopg2
 import json
 import datetime
 import six
-import re
 
 from psycopg2.extras import NamedTupleCursor
 from psycopg2.extras import Json
@@ -238,92 +237,6 @@ ID_UUID_NAME_CONFORMITY = {
 }
 
 
-def _get_aggregate_functions(aggregate):
-    if not aggregate:
-        return [f for f in STANDARD_AGGREGATES.values()]
-
-    functions = []
-    for a in aggregate:
-        if a.func in STANDARD_AGGREGATES:
-            functions.append(STANDARD_AGGREGATES[a.func])
-        elif a.func in UNPARAMETERIZED_AGGREGATES:
-            functions.append(UNPARAMETERIZED_AGGREGATES[a.func])
-        elif a.func in PARAMETERIZED_AGGREGATES['compute']:
-            validate = PARAMETERIZED_AGGREGATES['validate'].get(a.func)
-            if not (validate and validate(a.param)):
-                raise storage.StorageBadAggregate('Bad aggregate: %s.%s'
-                                                  % (a.func, a.param))
-            compute = PARAMETERIZED_AGGREGATES['compute'][a.func]
-            functions.append(compute(a.param))
-        else:
-            raise ceilometer.NotImplementedError(
-                'Selectable aggregate function %s'
-                ' is not supported' % a.func)
-
-    return functions
-
-
-def _make_stats_query(sample_filter, groupby, aggregate):
-    sql_select = ("SELECT min(samples.timestamp) as tsmin,"
-                  " max(samples.timestamp) as tsmax,"
-                  " meters.unit as unit")
-    aggr = _get_aggregate_functions(aggregate)
-    for a in aggr:
-        sql_select += ", {}".format(a)
-    if groupby:
-        # IGNORE THIS FOR TEST PURPOSES
-        #group_attributes = [getattr(models.Resource, g) for g in groupby]
-        group_attributes = ', '.join(['{} as {}'.format(
-            ID_UUID_NAME_CONFORMITY[g], g)
-            for g in groupby])
-        sql_select += ', {}'.format(group_attributes)
-    sql_select += (" FROM samples"
-                   " JOIN resources ON samples.resource_id = resources.id"
-                   " JOIN meters ON samples.meter_id = meters.id"
-                   " JOIN sources ON samples.source_id = sources.id"
-                   " JOIN projects ON samples.project_id = projects.id"
-                   " JOIN users ON samples.user_id = users.id")
-    sql_select, values = make_sql_query_from_filter(sql_select, sample_filter)
-    sql_select += " GROUP BY meters.unit"
-    if groupby:
-        group_attributes = ', '.join([ID_UUID_NAME_CONFORMITY[g]
-                                      for g in groupby])
-        sql_select += ', {}'.format(group_attributes)
-    sql_select += ";"
-    return sql_select, values
-
-
-def _stats_result_aggregates(result, aggregate):
-    stats_args = {}
-    for attr in ['min', 'max', 'sum', 'avg', 'count']:
-        if hasattr(result, attr):
-            stats_args[attr] = getattr(result, attr)
-    if aggregate:
-        stats_args['aggregate'] = {}
-        for a in aggregate:
-            key = '%s%s' % (a.func, '/%s' % a.param if a.param else '')
-            stats_args['aggregate'][key] = getattr(result, key)
-    return stats_args
-
-
-def _stats_result_to_model(result, period, period_start,
-                           period_end, groupby, aggregate):
-    stats_args = _stats_result_aggregates(result, aggregate)
-    stats_args['unit'] = result.unit
-    duration = ((result.tsmax - result.tsmin).seconds
-                if result.tsmin is not None and result.tsmax is not None
-                else None)
-    stats_args['duration'] = duration
-    stats_args['duration_start'] = result.tsmin
-    stats_args['duration_end'] = result.tsmax
-    stats_args['period'] = period
-    stats_args['period_start'] = period_start
-    stats_args['period_end'] = period_end
-    stats_args['groupby'] = (dict(
-        (g, getattr(result, g)) for g in groupby) if groupby else None)
-    return api_models.Statistics(**stats_args)
-
-
 class Connection(base.Connection):
 
     """PostgreSQL connections."""
@@ -362,6 +275,110 @@ class Connection(base.Connection):
             db.execute("""
                       
                       """)
+
+    def _retrieve_sample(s):
+        return api_models.Sample(
+            source=s.source_id,
+            counter_name=s.counter_name,
+            counter_type=s.counter_type,
+            counter_unit=s.counter_unit,
+            counter_volume=s.counter_volume,
+            user_id=s.user_id,
+            project_id=s.project_id,
+            resource_id=s.resource_id,
+            timestamp=s.timestamp,
+            recorded_at=s.recorded_at,
+            resource_metadata=s.metadata,
+            message_id=s.message_id,
+            message_signature=s.message_signature,
+        )
+
+    @staticmethod
+    def _get_aggregate_functions(aggregate):
+        if not aggregate:
+            return [f for f in STANDARD_AGGREGATES.values()]
+
+        functions = []
+        for a in aggregate:
+            if a.func in STANDARD_AGGREGATES:
+                functions.append(STANDARD_AGGREGATES[a.func])
+            elif a.func in UNPARAMETERIZED_AGGREGATES:
+                functions.append(UNPARAMETERIZED_AGGREGATES[a.func])
+            elif a.func in PARAMETERIZED_AGGREGATES['compute']:
+                validate = PARAMETERIZED_AGGREGATES['validate'].get(a.func)
+                if not (validate and validate(a.param)):
+                    raise storage.StorageBadAggregate('Bad aggregate: %s.%s'
+                                                      % (a.func, a.param))
+                compute = PARAMETERIZED_AGGREGATES['compute'][a.func]
+                functions.append(compute(a.param))
+            else:
+                raise ceilometer.NotImplementedError(
+                    'Selectable aggregate function %s'
+                    ' is not supported' % a.func)
+
+        return functions
+
+    @staticmethod
+    def _make_stats_query(sample_filter, groupby, aggregate):
+        sql_select = ("SELECT min(samples.timestamp) as tsmin,"
+                      " max(samples.timestamp) as tsmax,"
+                      " meters.unit as unit")
+        aggr = Connection._get_aggregate_functions(aggregate)
+        for a in aggr:
+            sql_select += ", {}".format(a)
+        if groupby:
+            # IGNORE THIS FOR TEST PURPOSES
+            #group_attributes = [getattr(models.Resource, g) for g in groupby]
+            group_attributes = ', '.join(['{} as {}'.format(
+                ID_UUID_NAME_CONFORMITY[g], g)
+                for g in groupby])
+            sql_select += ', {}'.format(group_attributes)
+        sql_select += (" FROM samples"
+                       " JOIN resources ON samples.resource_id = resources.id"
+                       " JOIN meters ON samples.meter_id = meters.id"
+                       " JOIN sources ON samples.source_id = sources.id"
+                       " JOIN projects ON samples.project_id = projects.id"
+                       " JOIN users ON samples.user_id = users.id")
+        sql_select, values = make_sql_query_from_filter(
+            sql_select, sample_filter)
+        sql_select += " GROUP BY meters.unit"
+        if groupby:
+            group_attributes = ', '.join([ID_UUID_NAME_CONFORMITY[g]
+                                          for g in groupby])
+            sql_select += ', {}'.format(group_attributes)
+        sql_select += ";"
+        return sql_select, values
+
+    @staticmethod
+    def _stats_result_aggregates(result, aggregate):
+        stats_args = {}
+        for attr in ['min', 'max', 'sum', 'avg', 'count']:
+            if hasattr(result, attr):
+                stats_args[attr] = getattr(result, attr)
+        if aggregate:
+            stats_args['aggregate'] = {}
+            for a in aggregate:
+                key = '%s%s' % (a.func, '/%s' % a.param if a.param else '')
+                stats_args['aggregate'][key] = getattr(result, key)
+        return stats_args
+
+    @staticmethod
+    def _stats_result_to_model(result, period, period_start,
+                               period_end, groupby, aggregate):
+        stats_args = Connection._stats_result_aggregates(result, aggregate)
+        stats_args['unit'] = result.unit
+        duration = ((result.tsmax - result.tsmin).seconds
+                    if result.tsmin is not None and result.tsmax is not None
+                    else None)
+        stats_args['duration'] = duration
+        stats_args['duration_start'] = result.tsmin
+        stats_args['duration_end'] = result.tsmax
+        stats_args['period'] = period
+        stats_args['period_start'] = period_start
+        stats_args['period_end'] = period_end
+        stats_args['groupby'] = (dict(
+            (g, getattr(result, g)) for g in groupby) if groupby else None)
+        return api_models.Statistics(**stats_args)
 
     def record_metering_data(self, data):
         """Write the data to the backend storage system.
@@ -646,23 +663,8 @@ class Connection(base.Connection):
         query += " ORDER BY samples.timestamp ASC;"
         with PoolConnection(self.conn_pool) as cur:
             cur.execute(query, values)
-            resp = cur.fetchall()
-        for s in resp:
-            yield api_models.Sample(
-                source=s.source_id,
-                counter_name=s.counter_name,
-                counter_type=s.counter_type,
-                counter_unit=s.counter_unit,
-                counter_volume=s.counter_volume,
-                user_id=s.user_id,
-                project_id=s.project_id,
-                resource_id=s.resource_id,
-                timestamp=s.timestamp,
-                recorded_at=s.recorded_at,
-                resource_metadata=s.metadata,
-                message_id=s.message_id,
-                message_signature=s.message_signature,
-            )
+            res = cur.fetchall()
+        return (self._retrieve_sample(x) for x in res)
 
     def get_meter_statistics(self, sample_filter, period=None, groupby=None,
                              aggregate=None):
@@ -676,20 +678,22 @@ class Connection(base.Connection):
                     raise ceilometer.NotImplementedError('Unable to group by '
                                                          'these fields')
         if not period:
-            q, v = _make_stats_query(sample_filter, groupby, aggregate)
+            q, v = Connection._make_stats_query(
+                sample_filter, groupby, aggregate)
             with PoolConnection(self.conn_pool) as db:
                 db.execute(q, v)
                 result = db.fetchall()
             if result:
                 for res in result:
-                    yield _stats_result_to_model(res, 0,
-                                                 res.tsmin, res.tsmax,
-                                                 groupby,
-                                                 aggregate)
+                    yield Connection._stats_result_to_model(res, 0,
+                                                            res.tsmin,
+                                                            res.tsmax,
+                                                            groupby,
+                                                            aggregate)
             return
 
         if not sample_filter.start or not sample_filter.end:
-            q, v = _make_stats_query(sample_filter, None, aggregate)
+            q, v = Connection._make_stats_query(sample_filter, None, aggregate)
             with PoolConnection(self.conn_pool) as db:
                 db.execute(q, v)
                 res = db.fetchone()
@@ -697,7 +701,8 @@ class Connection(base.Connection):
                     # NOTE(liusheng):The 'res' may be NoneType, because no
                     # sample has found with sample filter(s).
                 return
-        query, values = _make_stats_query(sample_filter, groupby, aggregate)
+        query, values = Connection._make_stats_query(
+            sample_filter, groupby, aggregate)
             # HACK(jd) This is an awful method to compute stats by period, but
             # since we're trying to be SQL agnostic we have to write portable
             # code, so here it is, admire! We're going to do one request to get
@@ -744,7 +749,7 @@ class Connection(base.Connection):
                 results = db.fetchall()
             if results:
                 for result in results:
-                    yield _stats_result_to_model(
+                    yield Connection._stats_result_to_model(
                         result=result,
                         period=int(timeutils.delta_seconds(period_start,
                                                            period_end)),
@@ -785,150 +790,11 @@ class Connection(base.Connection):
         with PoolConnection(self.conn_pool) as db:
             db.execute(sql_query, values)
             res = db.fetchall()
-            for s in res:
-                yield api_models.Sample(
-                    source=s.source_id,
-                    counter_name=s.counter_name,
-                    counter_type=s.counter_type,
-                    counter_unit=s.counter_unit,
-                    counter_volume=s.counter_volume,
-                    user_id=s.user_id,
-                    project_id=s.project_id,
-                    resource_id=s.resource_id,
-                    timestamp=s.timestamp,
-                    recorded_at=s.recorded_at,
-                    resource_metadata=s.metadata,
-                    message_id=s.message_id,
-                    message_signature=s.message_signature,
-                )
-
-    @staticmethod
-    def get_alarms(name=None, user=None,
-                   project=None, enabled=None, alarm_id=None, pagination=None):
-        """Yields a lists of alarms that match filters."""
-        raise NotImplementedError('Alarms not implemented')
-
-    @staticmethod
-    def create_alarm(alarm):
-        """Create an alarm. Returns the alarm as created.
-
-       :param alarm: The alarm to create.
-       """
-        raise NotImplementedError('Alarms not implemented')
-
-    @staticmethod
-    def update_alarm(alarm):
-        """Update alarm."""
-        raise NotImplementedError('Alarms not implemented')
-
-    @staticmethod
-    def delete_alarm(alarm_id):
-        """Delete an alarm."""
-        raise NotImplementedError('Alarms not implemented')
-
-    @staticmethod
-    def get_alarm_changes(alarm_id, on_behalf_of,
-                          user=None, project=None, type=None,
-                          start_timestamp=None, start_timestamp_op=None,
-                          end_timestamp=None, end_timestamp_op=None):
-        """Yields list of AlarmChanges describing alarm history
-
-       Changes are always sorted in reverse order of occurrence, given
-       the importance of currency.
-
-       Segregation for non-administrative users is done on the basis
-       of the on_behalf_of parameter. This allows such users to have
-       visibility on both the changes initiated by themselves directly
-       (generally creation, rule changes, or deletion) and also on those
-       changes initiated on their behalf by the alarming service (state
-       transitions after alarm thresholds are crossed).
-
-       :param alarm_id: ID of alarm to return changes for
-       :param on_behalf_of: ID of tenant to scope changes query (None for
-                            administrative user, indicating all projects)
-       :param user: Optional ID of user to return changes for
-       :param project: Optional ID of project to return changes for
-       :project type: Optional change type
-       :param start_timestamp: Optional modified timestamp start range
-       :param start_timestamp_op: Optional timestamp start range operation
-       :param end_timestamp: Optional modified timestamp end range
-       :param end_timestamp_op: Optional timestamp end range operation
-       """
-        raise NotImplementedError('Alarm history not implemented')
-
-    @staticmethod
-    def record_alarm_change(alarm_change):
-        """Record alarm change event."""
-        raise NotImplementedError('Alarm history not implemented')
+        return (self._retrieve_sample(x) for x in res)
 
     @staticmethod
     def clear():
         """Clear database."""
-
-    @staticmethod
-    def record_events(events):
-        """Write the events to the backend storage system.
-
-       :param events: a list of model.Event objects.
-       """
-        raise NotImplementedError('Events not implemented.')
-
-    @staticmethod
-    def get_events(event_filter):
-        """Return an iterable of model.Event objects.
-       """
-        raise NotImplementedError('Events not implemented.')
-
-    @staticmethod
-    def get_event_types():
-        """Return all event types as an iterable of strings.
-       """
-        raise NotImplementedError('Events not implemented.')
-
-    @staticmethod
-    def get_trait_types(event_type):
-        """Return a dictionary containing the name and data type of
-       the trait type. Only trait types for the provided event_type are
-       returned.
-
-       :param event_type: the type of the Event
-       """
-        raise NotImplementedError('Events not implemented.')
-
-    @staticmethod
-    def get_traits(event_type, trait_type=None):
-        """Return all trait instances associated with an event_type. If
-       trait_type is specified, only return instances of that trait type.
-
-       :param event_type: the type of the Event to filter by
-       :param trait_type: the name of the Trait to filter by
-       """
-
-        raise NotImplementedError('Events not implemented.')
-
-    @staticmethod
-    def query_alarms(filter_expr=None, orderby=None, limit=None):
-        """Return an iterable of model.Alarm objects.
-
-       :param filter_expr: Filter expression for query.
-       :param orderby: List of field name and direction pairs for order by.
-       :param limit: Maximum number of results to return.
-       """
-
-        raise NotImplementedError('Complex query for alarms '
-                                  'is not implemented.')
-
-    @staticmethod
-    def query_alarm_history(filter_expr=None, orderby=None, limit=None):
-        """Return an iterable of model.AlarmChange objects.
-
-       :param filter_expr: Filter expression for query.
-       :param orderby: List of field name and direction pairs for order by.
-       :param limit: Maximum number of results to return.
-       """
-
-        raise NotImplementedError('Complex query for alarms '
-                                  'history is not implemented.')
 
     @classmethod
     def get_capabilities(cls):
