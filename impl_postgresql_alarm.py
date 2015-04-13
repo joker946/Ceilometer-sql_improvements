@@ -1,6 +1,9 @@
+# -*- encoding: utf-8 -*-
+# Copyright © 2015 Servionica, LLC (I-Teco)
 #
-# Author: John Tran <jhtran@att.com>
-#         Julien Danjou <julien@danjou.info>
+# Authors: Dmirty Kubatkin <kubatkin@servionica.ru>
+#          Alexander Chadin <joker946@gmail.com>
+#          Alexander Stavitsky <alexandr.stavitsky@gmail.com>
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -23,7 +26,7 @@ from eventlet.support.psycopg2_patcher import make_psycopg_green
 make_psycopg_green()
 
 import psycopg2
-from psycopg2.extras import NamedTupleCursor, DictCursor
+from psycopg2.extras import DictCursor
 from psycopg2.extras import Json
 
 from oslo.config import cfg
@@ -34,6 +37,8 @@ from ceilometer.alarm.storage import models as alarm_api_models
 from ceilometer.openstack.common import log
 from ceilometer import utils
 
+import ceilometer.storage.postgresql.utils as psql_utils
+from ceilometer.storage.postgresql.utils import PoolConnection
 LOG = log.getLogger(__name__)
 
 AVAILABLE_CAPABILITIES = {
@@ -47,150 +52,6 @@ AVAILABLE_CAPABILITIES = {
 AVAILABLE_STORAGE_CAPABILITIES = {
     'storage': {'production_ready': True},
 }
-
-
-class PoolConnection(object):
-
-    """Wraps connection pool to ease of use with transactions"""
-
-    def __init__(self, pool, readonly=False, cursor_factory=None):
-        self._pool = pool
-        self._readonly = readonly
-        self._cursor_factory = (
-            NamedTupleCursor if not cursor_factory else cursor_factory)
-
-    def __enter__(self):
-        self._conn = self._pool.get()
-        self._curr = self._conn.cursor(
-            cursor_factory=self._cursor_factory
-        )
-        if self._readonly:
-            self._conn.autocommit = True
-        return self._curr
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._curr.close()
-        if self._readonly:
-            self._conn.autocommit = False
-        elif exc_type is None:
-            self._conn.commit()
-        else:
-            self._conn.rollback()
-
-        self._pool.put(self._conn)
-
-
-def make_metaquery(metastr, value):
-    elements = metastr.split('.')[1:]
-    if not elements:
-        return None
-    jsq = dict()
-    jsq_last = jsq
-    for e in elements[:-1]:
-        jsq_last[e] = dict()
-        jsq_last = jsq_last[e]
-    jsq_last[elements[-1]] = value
-    return jsq
-
-
-def apply_metaquery_filter(metaquery):
-    meta_filter = dict()
-    for key, value in six.iteritems(metaquery):
-        meta_filter.update(make_metaquery(key, value))
-    return ('metadata @> %s', Json(meta_filter))
-
-
-def make_sql_query_from_filter(query, sample_filter,
-                               limit=None, require_meter=True):
-    sql_where_body = ''
-    sql_limit_body = ''
-    subq_and = ' AND {}'
-    values = []
-    if sample_filter.meter:
-        sql_where_body += subq_and.format('meters.name = %s')
-        values.append(sample_filter.meter)
-    elif require_meter:
-        raise RuntimeError('Missing required meter specifier')
-    if sample_filter.source:
-        sql_where_body += subq_and.format('sources.name = %s')
-        values.append(sample_filter.source)
-    if sample_filter.user:
-        sql_where_body += subq_and.format('users.uuid = %s')
-        values.append(sample_filter.user)
-    if sample_filter.project:
-        sql_where_body += subq_and.format('projects.uuid = %s')
-        values.append(sample_filter.project)
-    if sample_filter.resource:
-        sql_where_body += subq_and.format('resources.resource_id = %s')
-        values.append(sample_filter.resource)
-    if sample_filter.message_id:
-        sql_where_body += subq_and.format('samples.message_id = %s')
-        values.append(sample_filter.message_id)
-    if sample_filter.metaquery:
-        q, v = apply_metaquery_filter(sample_filter.metaquery)
-        sql_where_body += subq_and.format(q)
-        values.append(v)
-    if sample_filter.start:
-        ts_start = sample_filter.start
-        if sample_filter.start_timestamp_op == 'gt':
-            sql_where_body += subq_and.format('samples.timestamp > %s')
-        else:
-            sql_where_body += subq_and.format('samples.timestamp >= %s')
-        values.append(ts_start)
-    if sample_filter.end:
-        ts_end = sample_filter.end
-        if sample_filter.end_timestamp_op == 'le':
-            sql_where_body += subq_and.format('samples.timestamp <= %s')
-        else:
-            sql_where_body += subq_and.format('samples.timestamp < %s')
-        values.append(ts_end)
-    if limit:
-        sql_limit_body = " LIMIT %s"
-        values.append(limit)
-    sql_where_body = sql_where_body.replace(' AND', ' WHERE', 1)
-    query = query + sql_where_body + sql_limit_body
-    return query, values
-complex_operators = ['and', 'or', 'not']
-
-
-def _handle_complex_op(complex_op, nodes, values):
-    items = []
-    for node in nodes:
-        node_str = _transform_filter(node, values)
-        items.append(node_str)
-    if complex_op == 'or':
-        return '(' + ' {} '.format(complex_op).join(items) + ')'
-    if complex_op == 'and':
-        return ' {} '.format(complex_op).join(items)
-
-
-def _handle_simple_op(simple_op, nodes, values):
-    if nodes.keys()[0].startswith('resource_metadata'):
-        q, v = apply_metaquery_filter(nodes)
-        values.append(v)
-        return q
-    values.append(nodes.values()[0])
-    return "%s %s %%s" % (nodes.keys()[0], simple_op)
-
-
-def _transform_filter(tree, values):
-    operator = tree.keys()[0]
-    nodes = tree.values()[0]
-    if operator in complex_operators:
-        return _handle_complex_op(operator, nodes, values)
-    else:
-        return _handle_simple_op(operator, nodes, values)
-
-
-def transform_filter(tree):
-    values = []
-    res = _transform_filter(tree, values)
-    return ' WHERE ' + res, values
-
-
-def transform_orderby(orderby):
-    return ' ORDER BY ' + ', '.join(['%s %s' % (x.keys()[0], x.values()[0])
-                                     for x in orderby])
 
 
 class Connection(base.Connection):
@@ -309,7 +170,7 @@ class Connection(base.Connection):
         with PoolConnection(self.conn_pool, cursor_factory=DictCursor) as db:
             db.execute(sql_query, values)
             res = db.fetchall()
-        return (self._row_to_alarm_model(x) for x in res)
+        return (self._row_to_alarm_model(alarm) for alarm in res)
 
     def delete_alarm(self, alarm_id):
         with PoolConnection(self.conn_pool) as db:
@@ -452,10 +313,10 @@ class Connection(base.Connection):
                      ') as c')
         values = []
         if filter_expr:
-            sql_where_body, values = transform_filter(filter_expr)
+            sql_where_body, values = psql_utils.transform_filter(filter_expr)
             sql_query += sql_where_body
         if orderby:
-            sql_query += transform_orderby(orderby)
+            sql_query += psql_utils.transform_orderby(orderby)
         if limit:
             sql_query += ' LIMIT %s'
             values.append(limit)
@@ -478,10 +339,10 @@ class Connection(base.Connection):
                      ') as c')
         values = []
         if filter_expr:
-            sql_where_body, values = transform_filter(filter_expr)
+            sql_where_body, values = psql_utils.transform_filter(filter_expr)
             sql_query += sql_where_body
         if orderby:
-            sql_query += transform_orderby(orderby)
+            sql_query += psql_utils.transform_orderby(orderby)
         if limit:
             sql_query += ' LIMIT %s'
             values.append(limit)
@@ -489,6 +350,80 @@ class Connection(base.Connection):
             db.execute(sql_query, values)
             res = db.fetchall()
         return (self._row_to_alarm_change_model(x) for x in res)
+
+    def update_alarm(self, alarm):
+        alarm = alarm.as_dict()
+        values = []
+        sql_query = (' UPDATE alarm'
+                     ' SET')
+
+        if alarm['user_id']:
+            user_id_q = ("SELECT id FROM users"
+                         " WHERE uuid = %s")
+            with PoolConnection(self.conn_pool) as db:
+                db.execute(user_id_q, (alarm['user_id'],))
+                user_resp = db.fetchone()
+            if user_resp:
+                user_id = user_resp.id
+                sql_query += " user_id = %s,"
+                values.append(user_id)
+            else:
+                LOG.debug(_("User does not exist in DB"))
+                return
+
+        if alarm['project_id']:
+            project_id_q = ('SELECT id from projects'
+                            ' WHERE uuid = %s')
+            with PoolConnection(self.conn_pool) as db:
+                db.execute(project_id_q, (alarm['project_id'],))
+                project_resp = db.fetchone()
+            if project_resp:
+                project_id = project_resp.id
+                sql_query += " project_id = %s,"
+                values.append(project_id)
+            else:
+                LOG.debug(_("Project does not exist in DB"))
+                return
+
+        if alarm['enabled']:
+            sql_query += ' enabled = %s,'
+            values.append(alarm['enabled'])
+        if alarm['name']:
+            sql_query += ' name = %s,'
+            values.append(alarm['name'])
+        if alarm['description']:
+            sql_query += ' description = %s,'
+            values.append(alarm['description'])
+        if alarm['state']:
+            sql_query += ' state = %s,'
+            values.append(alarm['state'])
+        if alarm['alarm_actions']:
+            sql_query += ' alarm_actions = %s,'
+            values.append(Json(alarm['alarm_actions']))
+        if alarm['ok_actions']:
+            sql_query += ' ok_actions = %s,'
+            values.append(Json(alarm['ok_actions']))
+        if alarm['insufficient_data_actions']:
+            sql_query += ' insufficient_data_actions = %s,'
+            values.append(Json(alarm['insufficient_data_actions']))
+        if alarm['repeat_actions']:
+            sql_query += ' repeat_actions = %s,'
+            values.append(alarm['repeat_actions'])
+        if alarm['time_constraints']:
+            sql_query += ' time_constraints = %s,'
+            values.append(Json(alarm['time_constraints']))
+        if alarm['rule']:
+            sql_query += ' rule = %s'
+            values.append(Json(alarm['rule']))
+
+        sql_query = sql_query.rstrip(',')
+        sql_query += ' WHERE alarm_id = %s'
+        values.append(alarm['alarm_id'])
+
+        with PoolConnection(self.conn_pool, cursor_factory=DictCursor) as db:
+            db.execute(sql_query, values)
+            stored_alarm = self.get_alarms(alarm_id=alarm['alarm_id']).next()
+        return stored_alarm
 
     @classmethod
     def get_capabilities(cls):

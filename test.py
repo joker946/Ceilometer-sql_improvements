@@ -14,7 +14,7 @@ obj_complex = {"and":
                    [{">": {"timestamp": "2013-12-01T18:30:00"}},
                     {"<": {"timestamp": "2013-12-01T18:45:00"}}]}]}]}
 
-obj_complex1 = {"and":[{"=": {"counter_name": "cpu_util"}},{"and":[{">": {"timestamp": "2013-12-01T18:00:00"}},{"<": {"timestamp": "2013-12-01T18:15:00"}}]}]}
+obj_complex1 = {"or":[{"=": {"counter_name": "cpu_util"}},{"and":[{">": {"timestamp": "2013-12-01T18:00:00"}},{"<": {"timestamp": "2013-12-01T18:15:00"}}]}]}
 complex_operators = ['and', 'or', 'not']
 
 

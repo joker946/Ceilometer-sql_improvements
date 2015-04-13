@@ -1,4 +1,4 @@
-#
+# -*- encoding: utf-8 -*-
 # Copyright © 2015 Servionica, LLC (I-Teco)
 #
 # Authors: Dmirty Kubatkin <kubatkin@servionica.ru>
@@ -18,9 +18,8 @@
 # under the License.
 
 
-import psycopg2
 import six
-from psycopg2.extras import NamedTupleCursor, DictCursor
+from psycopg2.extras import NamedTupleCursor
 from psycopg2.extras import Json
 
 
