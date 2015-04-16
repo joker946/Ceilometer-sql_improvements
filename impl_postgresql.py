@@ -250,14 +250,22 @@ class Connection(base.Connection):
 
         All timestamps must be naive utc datetime object.
         """
+        time_before_method_start=datetime.datetime.utcnow()
         dthandler = lambda obj: obj.isoformat() if isinstance(
             obj, datetime.datetime) else None
         recieved_datetime = data['timestamp']
         data['timestamp'] = recieved_datetime + datetime.timedelta(
             seconds=(datetime.datetime.now() - datetime.datetime.utcnow()).seconds)
         d = json.dumps(data, ensure_ascii=False, default=dthandler)
+        LOG.debug(_("String from JSON: {}".format(d)))
+        time_before_sample_writing=datetime.datetime.utcnow()
         with PoolConnection(self.conn_pool) as db:
-            db.execute('SELECT \"write_sample\"(%s);', (d,))
+            db.execute('SELECT \"write_sample_debug\"(%s);', (d,))
+        time_after_sample_writing=datetime.datetime.utcnow()
+        writing_time=time_after_sample_writing-time_before_sample_writing
+        method_time=time_after_sample_writing-time_before_method_start
+        LOG.debug(_("\n\nRecord_metering_data() with Sample with timestamp {0} was working for {1} seconds and {2} microseconds".format(data['timestamp'], method_time.seconds, method_time.microseconds)))
+        LOG.debug(_("\n\nSample with timestamp {0} was writing for {1} seconds and {2} microseconds".format(data['timestamp'], writing_time.seconds, writing_time.microseconds)))
 
     def clear_expired_metering_data(self, ttl):
         """Clear expired data from the backend storage system according to the
@@ -673,3 +681,4 @@ class Connection(base.Connection):
         This is needed to evaluate the performance of each driver.
         """
         return cls.STORAGE_CAPABILITIES
+

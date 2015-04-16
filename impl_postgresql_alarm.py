@@ -25,6 +25,8 @@ from eventlet.db_pool import ConnectionPool
 from eventlet.support.psycopg2_patcher import make_psycopg_green
 make_psycopg_green()
 
+import datetime
+
 import psycopg2
 from psycopg2.extras import DictCursor
 from psycopg2.extras import Json
@@ -380,39 +382,40 @@ class Connection(base.Connection):
             if project_resp:
                 project_id = project_resp.id
                 sql_query += " project_id = %s,"
-                values.append(project_id)
+                values.append(alarm['project_id'])
             else:
                 LOG.debug(_("Project does not exist in DB"))
                 return
-
-        if alarm['enabled']:
+        # Note (alexstav): "'key' in dict" form required
+        # for values with bool or empty array types
+        if 'enabled' in alarm:
             sql_query += ' enabled = %s,'
             values.append(alarm['enabled'])
-        if alarm['name']:
+        if 'name' in alarm:
             sql_query += ' name = %s,'
             values.append(alarm['name'])
-        if alarm['description']:
+        if 'description' in alarm:
             sql_query += ' description = %s,'
             values.append(alarm['description'])
-        if alarm['state']:
+        if 'state' in alarm:
             sql_query += ' state = %s,'
             values.append(alarm['state'])
-        if alarm['alarm_actions']:
+        if 'alarm_actions' in alarm:
             sql_query += ' alarm_actions = %s,'
             values.append(Json(alarm['alarm_actions']))
-        if alarm['ok_actions']:
+        if 'ok_actions' in alarm:
             sql_query += ' ok_actions = %s,'
             values.append(Json(alarm['ok_actions']))
-        if alarm['insufficient_data_actions']:
+        if 'insufficient_data_actions' in alarm:
             sql_query += ' insufficient_data_actions = %s,'
             values.append(Json(alarm['insufficient_data_actions']))
-        if alarm['repeat_actions']:
+        if 'repeat_actions' in alarm:
             sql_query += ' repeat_actions = %s,'
             values.append(alarm['repeat_actions'])
-        if alarm['time_constraints']:
+        if 'time_constraints' in alarm:
             sql_query += ' time_constraints = %s,'
             values.append(Json(alarm['time_constraints']))
-        if alarm['rule']:
+        if 'rule' in alarm:
             sql_query += ' rule = %s'
             values.append(Json(alarm['rule']))
 
@@ -420,10 +423,14 @@ class Connection(base.Connection):
         sql_query += ' WHERE alarm_id = %s'
         values.append(alarm['alarm_id'])
 
-        with PoolConnection(self.conn_pool, cursor_factory=DictCursor) as db:
-            db.execute(sql_query, values)
-            stored_alarm = self.get_alarms(alarm_id=alarm['alarm_id']).next()
-        return stored_alarm
+    with PoolConnection(self.conn_pool) as db:
+        db.execute(sql_query, values)
+    # returns first Alarm object from generator
+    stored_alarm = self.get_alarms(alarm_id=alarm['alarm_id']).next()
+    LOG.debug(
+        _("/nStored alarm camed from get_alarms():\n{}\n".format(str(stored_alarm.as_dict()))))
+    return stored_alarm
+
 
     @classmethod
     def get_capabilities(cls):
