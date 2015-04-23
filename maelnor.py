@@ -2,7 +2,8 @@ import plpy
 jdata = ''
 SD = {}
 
-#create or replace function write_sample(jdata text) returns void as $$
+
+create or replace function write_sample(jdata text) returns void as $$
 
 try:
     import simplejson as json
@@ -214,35 +215,37 @@ elif meter_name in ['cpu', 'memory']:  # subcounters
     if meter_name == 'cpu':
         volume /= 1000000000.0  # nanoseconds
 elif meter_name == 'image-size' and \
-     'properties' in data['resource_metadata'] and \
-     'instance_uuid' in data['resource_metadata']['properties']:
+        'properties' in data['resource_metadata'] and \
+        'instance_uuid' in data['resource_metadata']['properties']:
     owner = data['resource_metadata']['properties']['instance_uuid']
     if '_backup_' in data['resource_metadata']['properties']['name']:
         meter_name = 'backup-size'
 
-if 'create' in data['resource_metadata']['event_type']:
+if 'event_type' in data['resource_metadata'] and \
+        'create' in data['resource_metadata']['event_type']:
     event_type = 'start'
-elif 'delete' in data['resource_metadata']['event_type']:
+elif 'event_type' in data['resource_metadata'] and \
+        'delete' in data['resource_metadata']['event_type']:
     event_type = 'stop'
 else:
     event_type = 'exists'
 
-timestamp = data['timestamp'].replace(microsecond=0)
+timestamp = data['timestamp']
 tenant_key = data['project_id']
 
 prebill_selfu = SD.setdefault('prebill_selfu',
                               prep("SELECT seq, volume, last_value,"
                                    " last_timestamp FROM prebill"
-                                   " WHERE updating = 0 AND"
+                                   " WHERE updating is False AND"
                                    " event_type = 'exists' AND obj_key = $1"
                                    " AND class = $2 AND tenant_key = $3"
                                    " AND counter_type = $4 FOR UPDATE",
-                                   ['text', 'text', 'text', 'counter_type']))
+                                   ['text', 'text', 'text', 'text']))
 
 prebill_upd = SD.setdefault('prebill_upd',
                             prep("UPDATE prebill SET stamp_end = $1,"
                                  " volume = $2, last_value = $3,"
-                                 " last_timestamp = $4 WHERE seq = $4",
+                                 " last_timestamp = $4 WHERE seq = $5",
                                  ['timestamp', 'float', 'float', 'timestamp',
                                   'bigint']))
 
@@ -250,23 +253,24 @@ prebill_ins = SD.setdefault('prebill_ins',
                             prep("INSERT INTO prebill (class, obj_key,"
                                  " event_type, stamp_start, stamp_end, volume,"
                                  " owner_key, tenant_key, counter_type,"
-                                 " last_value, last_timestamp) VALUES"
+                                 " last_value, last_timestamp, updating) VALUES"
                                  " ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9,"
-                                 " $10)",
-                                 ['text', 'text', 'event_type', 'timestamp',
-                                  'timestamp', 'float', 'text', 'text',
-                                  'counter_type', 'float', 'timestamp']))
+                                 " $10, False)",
+                                 ['text', 'text', 'text', 'timestamp', 'float',
+                                  'text', 'text', 'text', 'float',
+                                  'timestamp']))
 
 
 def calcValue(data):
-    last_value = data['last_value']
-    cur_volume = data['volume']
+    last_value = data[0]['last_value']
+    cur_volume = data[0]['volume']
     if counter_type == 'cumulative':
         value = cur_volume + volume
         if last_value <= volume:
             value -= last_value
+        return value
     else:
-        period = timestamp - data['last_timestamp']
+        period = timestamp - data[0]['last_timestamp']
         seconds = period.seconds + period.days * 24 * 3600
         value += ((volume + last_value) / 2) * seconds
 
@@ -277,19 +281,20 @@ with plpy.subtransaction():
     if result:
         value = calcValue(result)
         plpy.execute(prebill_upd,
-                     [timestamp, value, volume, timestamp, result['seq']])
+                     [timestamp, value, volume, timestamp, result[0]['seq']])
     else:
         try:
             value = volume if counter_type == 'cumulative' else 0
             plpy.execute(prebill_ins,
-                         [meter_name, obj_id, event_type, timestamp, value,
-                          owner, tenant_key, counter_type, volume, timestamp])
+                         [meter_name, obj_id, event_type, timestamp,
+                          value, owner, tenant_key, counter_type, volume,
+                          timestamp])
         except spiexceptions.UniqueViolation:
             result = plpy.execute(prebill_selfu,
                                   [obj_id, meter_name, tenant_key,
                                    counter_type])
             value = calcValue(result)
             plpy.execute(prebill_upd,
-                         [timestamp, value, volume, timestamp, result['seq']])
+                         [timestamp, value, volume, timestamp, result[0]['seq']])
 
-#$$ language plpythonu;
+$$ language plpythonu;
