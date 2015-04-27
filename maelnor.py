@@ -15,6 +15,8 @@ from plpy import prepare as prep
 from dateutil import parser
 data = json.loads(jdata)
 
+plpy.info('start')
+
 
 def upsert(upd, ins, field, data):
     """ Upsert capabale function. Can do select-insert or update-insert,
@@ -115,7 +117,7 @@ def volumeSuffix(volt):
     else:
         return checkVolumeType(volt)
 
-
+plpy.info('before_sel_write')
 source_sel = SD.setdefault('source_sel',
                            prep("SELECT id FROM sources WHERE name = $1",
                                 ['text']))
@@ -123,7 +125,7 @@ source_ins = SD.setdefault('source_ins',
                            prep("INSERT INTO sources (name) VALUES ($1)"
                                 " RETURNING id", ['text']))
 source_id = upsert(source_sel, source_ins, 'id', [data['source']])
-
+plpy.info('after_sel_write')
 if data['user_id']:
     user_sel = SD.setdefault('user_sel',
                              prep("SELECT id FROM users WHERE"
@@ -205,7 +207,8 @@ obj_id = data['resource_id']
 owner = ''
 volume = data['counter_volume']
 meter_name = data['counter_name'].replace('.', '-')
-if meter_name.startswith('instance'):
+# ASK: image_ref isn't always in sample metadata
+if meter_name.startswith('instance') and 'image_ref' in data['resource_metadata']:
     meter_name += imageSuffix(data['resource_metadata']['image_ref'])
 elif meter_name.startswith('volume'):
     meter_name += volumeSuffix(data['resource_metadata']['volume_type'])
@@ -282,6 +285,7 @@ def get_prev_val():
         seconds = (
             timestamp - parser.parse(last_timestamp)).total_seconds()
         return ((volume + last_value) / 2) * seconds
+    return 0
 
 
 def calcValue(data):
@@ -308,7 +312,7 @@ with plpy.subtransaction():
                      [timestamp, value, volume, timestamp, result[0]['seq']])
     else:
         try:
-            value = volume if counter_type == 'cumulative' else get_prev_val()
+            value = volume if counter_type == 'cumulative' else 0
             plpy.execute(prebill_ins,
                          [meter_name, obj_id, event_type, timestamp,
                           value, owner, tenant_key, counter_type, volume,
