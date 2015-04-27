@@ -312,7 +312,7 @@ with plpy.subtransaction():
                      [timestamp, value, volume, timestamp, result[0]['seq']])
     else:
         try:
-            value = volume if counter_type == 'cumulative' else 0
+            value = volume if counter_type == 'cumulative' else get_prev_val()
             plpy.execute(prebill_ins,
                          [meter_name, obj_id, event_type, timestamp,
                           value, owner, tenant_key, counter_type, volume,
