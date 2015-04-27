@@ -1,36 +1,58 @@
 import datetime
 from ceilometer_local_lib import PoolConnection
 t = {
-    'counter_name': 'image_test',
-    'user_id': None,
-    'message_signature': 'cb823c822932b57441e1c92c993a810cba62a0a3177b28ee4018813943992714',
-    'timestamp': datetime.datetime(2015, 4, 5, 12, 33, 21),
-    'resource_id': '9c37c6d4-fda3-4b0e-a114-363f35934ee8',
-    'message_id': 'f2126a3a-db8f-11e4-b020-00505696f68d',
-    'source': 'openstack',
-    'counter_unit': 'image',
-    'counter_volume': 1,
-    'project_id': 'f2cc0bbd0b724e41b0b70059ea2b9f91',
-    'resource_metadata': {
-        'status': 'active',
-        'name': 'cirros-0.3.3-x86_64',
-        'deleted': False,
-        'container_format': 'bare',
-        'created_at': '2014-12-18T13: 54: 04.760635',
-        'disk_format': 'qcow2',
-        'updated_at': '2014-12-18T13: 54: 05.140236',
-        'properties': {
-
+    "counter_name": "instance:m1.tiny",
+    "user_id": "3d622ea5a70a42d3aae549ddfc1ef355",
+    "message_signature": "f9d8bc4ffe438735a9faed75d7854e2873f7314f78afa4993abac989541b8da2",
+    "timestamp": "2015-04-28T17:35:46",
+    "resource_id": "c73270fc-f314-4aeb-8ff7-d94aef3e37d3",
+    "message_id": "dc1fff94-ea71-11e4-97f9-005056968dc7",
+    "source": "openstack",
+    "counter_unit": "instance",
+    "counter_volume": 1,
+    "project_id": "f2cc0bbd0b724e41b0b70059ea2b9f91",
+    "resource_metadata": {
+        "status": "active",
+        "ramdisk_id": None,
+        "display_name": "alexmustwin",
+        "name": "instance-00000006",
+        "disk_gb": 1,
+        "kernel_id": None,
+        "image": {
+            "id": "9c37c6d4-fda3-4b0e-a114-363f35934ee8",
+            "links": [
+                {
+                    "href": "http://controller1:8774/3de35c7ecdca4974b5af5adaca49ca9b/images/9c37c6d4-fda3-4b0e-a114-363f35934ee8",
+                    "rel": "bookmark"
+                }
+            ],
+            "name": "cirros-0.3.3-x86_64"
         },
-        'protected': False,
-        'checksum': '133eae9fb1c98f45894a4e60d8736619',
-        'min_disk': 0,
-        'is_public': True,
-        'deleted_at': None,
-        'min_ram': 0,
-        'size': 13200896
+        "ephemeral_gb": 0,
+        "host": "718734f24c0996b10bd544553ad09029d9b95180cc1ceff2ecc657c6",
+        "memory_mb": 512,
+        "instance_type": "1",
+        "vcpus": 1,
+        "root_gb": 1,
+        "image_ref": "9c37c6d4-fda3-4b0e-a114-363f35934ee8",
+        "flavor": {
+            "name": "m1.tiny",
+            "links": [
+                {
+                    "href": "http://controller1:8774/3de35c7ecdca4974b5af5adaca49ca9b/flavors/1",
+                    "rel": "bookmark"
+                }
+            ],
+            "ram": 512,
+            "ephemeral": 0,
+            "vcpus": 1,
+            "disk": 1,
+            "id": "1"
+        },
+        "OS-EXT-AZ:availability_zone": "nova",
+        "image_ref_url": "http://controller1:8774/3de35c7ecdca4974b5af5adaca49ca9b/images/9c37c6d4-fda3-4b0e-a114-363f35934ee8"
     },
-    'counter_type': u'gauge'
+    "counter_type": "gauge"
 }
 
 sample = {
@@ -42,7 +64,7 @@ sample = {
     "message_id": "37db6808-e9ca-11e4-97f9-005056968dc7",
     "source": "openstack",
     "counter_unit": "ns",
-    "counter_volume": 7041350000000,
+    "counter_volume": 7051350000000,
     "project_id": "f2cc0bbd0b724e41b0b70059ea2b9f91",
     "resource_metadata": {
         "status": "active",
@@ -90,7 +112,7 @@ sample = {
 }
 import psycopg2
 import json
-data = json.dumps(sample)
+data = json.dumps(t)
 with PoolConnection() as db:
     db.execute("SELECT \"write_sample\"(%s);", (data,))
 """

@@ -12,7 +12,7 @@ except ImportError:
 
 from plpy import spiexceptions
 from plpy import prepare as prep
-
+from dateutil import parser
 data = json.loads(jdata)
 
 
@@ -230,13 +230,13 @@ elif 'event_type' in data['resource_metadata'] and \
 else:
     event_type = 'exists'
 
-timestamp = data['timestamp']
+timestamp = parser.parse(data['timestamp']).replace(microsecond=0)
 tenant_key = data['project_id']
 
 prebill_selfu = SD.setdefault('prebill_selfu',
                               prep("SELECT seq, volume, last_value,"
                                    " last_timestamp FROM prebill"
-                                   " WHERE updating is False AND"
+                                   " WHERE updating = 0 AND"
                                    " event_type = 'exists' AND obj_key = $1"
                                    " AND class = $2 AND tenant_key = $3"
                                    " AND counter_type = $4 FOR UPDATE",
@@ -255,10 +255,33 @@ prebill_ins = SD.setdefault('prebill_ins',
                                  " owner_key, tenant_key, counter_type,"
                                  " last_value, last_timestamp, updating) VALUES"
                                  " ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9,"
-                                 " $10, False)",
+                                 " $10, 0)",
                                  ['text', 'text', 'text', 'timestamp', 'float',
                                   'text', 'text', 'text', 'float',
                                   'timestamp']))
+prebill_get = SD.setdefault('prebill_get',
+                            prep("SELECT last_value, last_timestamp"
+                                 " FROM prebill"
+                                 " WHERE class = $1 AND"
+                                 " obj_key = $2 AND tenant_key = $3 AND"
+                                 " counter_type = $4 AND event_type = $5 AND"
+                                 " owner_key = $6 AND updating != 0"
+                                 " ORDER BY seq DESC LIMIT 1",
+                                 ['text', 'text', 'text', 'text', 'text',
+                                  'text']))
+
+
+def get_prev_val():
+    # Note (alexchadin): Get previous value and last timestamp
+    # to calculate new value after previous row is collected (updating != 0).
+    result = plpy.execute(prebill_get, [meter_name, obj_id, tenant_key,
+                                        counter_type, event_type, owner])
+    if result:
+        last_value = result[0]['last_value']
+        last_timestamp = result[0]['last_timestamp']
+        seconds = (
+            timestamp - parser.parse(last_timestamp)).total_seconds()
+        return ((volume + last_value) / 2) * seconds
 
 
 def calcValue(data):
@@ -268,11 +291,12 @@ def calcValue(data):
         value = cur_volume + volume
         if last_value <= volume:
             value -= last_value
-        return value
     else:
-        period = timestamp - data[0]['last_timestamp']
-        seconds = period.seconds + period.days * 24 * 3600
-        value += ((volume + last_value) / 2) * seconds
+        period = timestamp - parser.parse(data[0]['last_timestamp'])
+        #seconds = period.seconds + period.days * 24 * 3600
+        seconds = period.total_seconds()
+        value = cur_volume + ((volume + last_value) / 2) * seconds
+    return value
 
 
 with plpy.subtransaction():
@@ -284,7 +308,7 @@ with plpy.subtransaction():
                      [timestamp, value, volume, timestamp, result[0]['seq']])
     else:
         try:
-            value = volume if counter_type == 'cumulative' else 0
+            value = volume if counter_type == 'cumulative' else get_prev_val()
             plpy.execute(prebill_ins,
                          [meter_name, obj_id, event_type, timestamp,
                           value, owner, tenant_key, counter_type, volume,
