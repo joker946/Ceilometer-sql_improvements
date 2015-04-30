@@ -112,7 +112,7 @@ def checkVolumeType(volt):
 
 
 def volumeSuffix(volt):
-    if volt in SD['voltsuf']:
+    if volt in SD.setdefault('voltsuf', fillVolumeTypes()):
         return SD['voltsuf'][volt]
     else:
         return checkVolumeType(volt)
