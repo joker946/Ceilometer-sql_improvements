@@ -15,8 +15,6 @@ from plpy import prepare as prep
 from dateutil import parser
 data = json.loads(jdata)
 
-plpy.info('start')
-
 
 def upsert(upd, ins, field, data):
     """ Upsert capabale function. Can do select-insert or update-insert,
@@ -117,7 +115,6 @@ def volumeSuffix(volt):
     else:
         return checkVolumeType(volt)
 
-plpy.info('before_sel_write')
 source_sel = SD.setdefault('source_sel',
                            prep("SELECT id FROM sources WHERE name = $1",
                                 ['text']))
@@ -125,7 +122,6 @@ source_ins = SD.setdefault('source_ins',
                            prep("INSERT INTO sources (name) VALUES ($1)"
                                 " RETURNING id", ['text']))
 source_id = upsert(source_sel, source_ins, 'id', [data['source']])
-plpy.info('after_sel_write')
 if data['user_id']:
     user_sel = SD.setdefault('user_sel',
                              prep("SELECT id FROM users WHERE"
