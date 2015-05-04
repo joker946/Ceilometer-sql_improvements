@@ -243,7 +243,7 @@ prebill_selfu = SD.setdefault('prebill_selfu',
                                    " event_type = 'exists' AND obj_key = $1"
                                    " AND class = $2 AND tenant_key = $3"
                                    " AND counter_type = $4 FOR UPDATE",
-                                   ['text', 'text', 'text', 'text']))
+                                   ['text', 'text', 'text', 'counter_type']))
 
 prebill_upd = SD.setdefault('prebill_upd',
                             prep("UPDATE prebill SET stamp_end = $1,"
@@ -259,8 +259,8 @@ prebill_ins = SD.setdefault('prebill_ins',
                                  " last_value, last_timestamp, updating) VALUES"
                                  " ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9,"
                                  " $10, 0)",
-                                 ['text', 'text', 'text', 'timestamp', 'float',
-                                  'text', 'text', 'text', 'float',
+                                 ['text', 'text', 'event_type', 'timestamp', 'float',
+                                  'text', 'text', 'counter_type', 'float',
                                   'timestamp']))
 prebill_get = SD.setdefault('prebill_get',
                             prep("SELECT last_value, last_timestamp"
@@ -270,7 +270,7 @@ prebill_get = SD.setdefault('prebill_get',
                                  " counter_type = $4 AND event_type = $5 AND"
                                  " owner_key = $6 AND updating != 0"
                                  " ORDER BY seq DESC LIMIT 1",
-                                 ['text', 'text', 'text', 'text', 'text',
+                                 ['text', 'text', 'text', 'counter_type', 'event_type',
                                   'text']))
 
 
